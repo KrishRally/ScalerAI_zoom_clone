@@ -7,9 +7,10 @@ X-Participant-Token header (see participant_service.authenticate).
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app import schemas
+from app import config, schemas
 from app.database import get_db
 from app.dependencies import participant_token
+from app.services import ice as ice_service
 from app.services import participants as participant_service
 
 router = APIRouter(prefix="/api/participants", tags=["participants"])
@@ -48,6 +49,19 @@ def take_signals(
     """WebRTC: collect connection notes left for this participant."""
     me = participant_service.authenticate(db, participant_id, token)
     return participant_service.take_signals(db, me)
+
+
+@router.get("/{participant_id}/ice-servers", response_model=schemas.IceServersOut)
+def ice_servers(
+    participant_id: int,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    """WebRTC: the STUN and TURN servers to use. Only for people in a meeting, so relay logins aren't handed out to anyone."""
+    participant_service.authenticate(db, participant_id, token)
+    servers = ice_service.ice_servers()
+    has_relay = ice_service.has_relay(servers)
+    return {"ice_servers": servers, "has_relay": has_relay, "relay_only": has_relay and config.TURN_FORCE_RELAY}
 
 
 @router.post("/{participant_id}/leave", status_code=status.HTTP_204_NO_CONTENT)

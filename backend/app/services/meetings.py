@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -44,7 +45,11 @@ def get_settings(db: Session, meeting: Meeting) -> MeetingSettings:
     """
     if meeting.settings is None:
         meeting.settings = MeetingSettings()
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Another request created it at the same moment: use theirs.
+            db.rollback()
         db.refresh(meeting)
     return meeting.settings
 

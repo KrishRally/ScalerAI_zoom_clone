@@ -33,7 +33,8 @@ export default function MeetingStage({ participants, meId, myStream, remote, spe
       participant: p,
       isMe: p.id === meId,
       stream: p.id === meId ? myStream : media?.camera ?? null,
-      connecting: p.id !== meId && media?.state !== "connected",
+      connecting: p.id !== meId && media?.state !== "connected" && media?.state !== "failed",
+      failed: p.id !== meId && media?.state === "failed",
       speaking: speaking.has(p.id),
       reaction: reactions[p.id] ?? null,
     };

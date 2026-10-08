@@ -202,7 +202,17 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
   const others = people.filter((p) => p.id !== pid);
 
   // ---- Real audio and video with everyone else (WebRTC) ----
-  const remote = usePeerMesh(pid, others.map((p) => p.id), media.stream, screen);
+  const { remote, status: callStatus } = usePeerMesh(pid, others.map((p) => p.id), media.stream, screen);
+  // Someone we can't reach after a while: usually a network that needs a relay (TURN) server.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const notConnected = others.some((p) => remote[p.id] && remote[p.id].state !== "connected");
+    if (!notConnected) return setStuck(false);
+    const t = setTimeout(() => setStuck(true), 25_000);
+    return () => clearTimeout(t);
+    // Re-check when anyone's connection state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [others.map((p) => `${p.id}:${remote[p.id]?.state}`).join(",")]);
   const remoteVoices = useMemo(
     () => Object.fromEntries(others.filter((p) => !p.is_muted).map((p) => [p.id, remote[p.id]?.audio])),
     [others, remote],
@@ -422,6 +432,18 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
       {room.connectionLost && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500 py-1 text-xs font-semibold text-zoom-ink">
           <WifiOff className="h-3.5 w-3.5" /> Connection lost. Reconnecting...
+        </div>
+      )}
+      {callStatus.serverOutdated && (
+        <div className="shrink-0 bg-amber-500 py-1 text-center text-xs font-semibold text-zoom-ink">
+          Video calling isn&apos;t available: the server is running an older version. Redeploy the backend.
+        </div>
+      )}
+      {!callStatus.serverOutdated && stuck && (
+        <div className="shrink-0 bg-[#2B2B2B] px-3 py-1 text-center text-xs text-[#D0D0D0]">
+          {callStatus.hasRelay
+            ? "Still connecting to someone. Their network may be blocking video; chat and reactions still work."
+            : "Can't reach someone's video. Your networks need a relay (TURN) server, which isn't set up on this server yet. Chat and reactions still work."}
         </div>
       )}
       {audioBlocked && (

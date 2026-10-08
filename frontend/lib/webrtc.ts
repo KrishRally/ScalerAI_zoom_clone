@@ -14,7 +14,7 @@
 //   a share just swaps the track in a slot (replaceTrack), so there is no
 //   need to renegotiate the connection.
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { SignalData } from "@/lib/types";
 
 export type Slot = "audio" | "camera" | "screen";
@@ -28,24 +28,26 @@ export interface RemoteMedia {
   state: RTCPeerConnectionState;
 }
 
-/** STUN servers by default. Set NEXT_PUBLIC_ICE_SERVERS (JSON) to add a TURN server for strict networks. */
-function iceServers(): RTCIceServer[] {
-  const custom = process.env.NEXT_PUBLIC_ICE_SERVERS;
-  if (custom) {
-    try {
-      return JSON.parse(custom) as RTCIceServer[];
-    } catch {
-      console.warn("NEXT_PUBLIC_ICE_SERVERS is not valid JSON; using the default STUN servers");
-    }
-  }
-  return [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+/** Used only if the server can't be asked (old server or network trouble). */
+const FALLBACK_ICE: RTCIceServer[] = [{ urls: ["stun:stun.l.google.com:19302"] }];
+
+/** How the calls are doing overall, for messages in the room. */
+export interface MeshStatus {
+  /** The server has a TURN relay, so strict networks can still connect. */
+  hasRelay: boolean;
+  /** The server doesn't know about video calls yet (an old version is running). */
+  serverOutdated: boolean;
 }
 
 // We send each note once, with all network addresses inside, instead of
 // trickling them one by one. Simpler with polling; this is the longest we wait.
-const GATHER_MAX_MS = 2500;
+const GATHER_MAX_MS = 5000; // relay addresses can take a few seconds
 // If nobody answers our offer in this time (they may still be joining), offer again.
 const ANSWER_TIMEOUT_MS = 10_000;
+// An answered connection that still isn't up after this long is started again.
+const CONNECT_TIMEOUT_MS = 20_000;
+// A connection that drops ("disconnected") and doesn't come back by itself in this time is restarted.
+const DROPPED_MS = 6000;
 // Check for notes often while a connection is being set up, slowly otherwise.
 const POLL_FAST_MS = 700;
 const POLL_SLOW_MS = 2500;
@@ -58,6 +60,7 @@ interface Peer {
   senders: RTCRtpSender[];
   startedAt: number;
   answered: boolean;
+  droppedAt: number | null;
 }
 
 const newSession = () => Math.random().toString(36).slice(2, 10);
@@ -85,13 +88,39 @@ export class PeerMesh {
   private stopped = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval>;
+  private iceServers: RTCIceServer[] = FALLBACK_ICE;
+  private relayOnly = false;
+  /** Resolves once we know which STUN / TURN servers to use. */
+  private ready: Promise<void>;
+  private status: MeshStatus = { hasRelay: false, serverOutdated: false };
+  private isReady = false;
 
   constructor(
     private readonly me: number,
     private readonly onChange: (remote: Record<number, RemoteMedia>) => void,
+    private readonly onStatus: (status: MeshStatus) => void = () => {},
   ) {
-    this.poll();
+    this.ready = api
+      .iceServers(me)
+      .then((res) => {
+        this.iceServers = res.ice_servers as RTCIceServer[];
+        this.relayOnly = res.relay_only;
+        this.setStatus({ hasRelay: res.has_relay });
+      })
+      .catch((e) => {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 405)) this.setStatus({ serverOutdated: true });
+      });
+    this.ready.then(() => {
+      this.isReady = true;
+      this.poll();
+      this.checkConnections(); // start the offers that were waiting
+    });
     this.watchdog = setInterval(() => this.checkConnections(), 2000);
+  }
+
+  private setStatus(changes: Partial<MeshStatus>) {
+    this.status = { ...this.status, ...changes };
+    this.onStatus(this.status);
   }
 
   /** The people (participant ids) who are in the meeting right now, not counting us. */
@@ -100,6 +129,7 @@ export class PeerMesh {
     for (const id of Array.from(this.peers.keys())) {
       if (!this.wanted.has(id)) this.close(id);
     }
+    if (!this.isReady) return; // offers start once we know the servers
     for (const id of Array.from(this.wanted)) {
       if (!this.peers.has(id) && this.me < id) this.offer(id);
     }
@@ -142,8 +172,11 @@ export class PeerMesh {
 
   private create(id: number, offerer: boolean, session: string): Peer {
     this.close(id, false);
-    const pc = new RTCPeerConnection({ iceServers: iceServers() });
-    const peer: Peer = { pc, session, offerer, senders: [], startedAt: Date.now(), answered: false };
+    const pc = new RTCPeerConnection({
+      iceServers: this.iceServers,
+      iceTransportPolicy: this.relayOnly ? "relay" : "all",
+    });
+    const peer: Peer = { pc, session, offerer, senders: [], startedAt: Date.now(), answered: false, droppedAt: null };
 
     pc.ontrack = (e) => {
       // The slot is known from the transceiver's position: 0 mic, 1 camera, 2 screen.
@@ -152,6 +185,7 @@ export class PeerMesh {
     };
     pc.onconnectionstatechange = () => {
       if (this.peers.get(id) !== peer) return;
+      peer.droppedAt = pc.connectionState === "disconnected" ? peer.droppedAt ?? Date.now() : null;
       this.update(id, { state: pc.connectionState });
     };
 
@@ -178,6 +212,8 @@ export class PeerMesh {
 
   /** We have the lower id: start a connection and send the offer. */
   private async offer(id: number) {
+    await this.ready;
+    if (this.stopped || !this.wanted.has(id)) return;
     const session = newSession();
     const peer = this.create(id, true, session);
     const { pc } = peer;
@@ -195,6 +231,7 @@ export class PeerMesh {
 
   /** Someone with a lower id wants to connect: answer them. */
   private async answer(from: number, data: SignalData) {
+    await this.ready;
     const existing = this.peers.get(from);
     if (existing?.session === data.session) return; // already handled this offer
     const peer = this.create(from, false, data.session);
@@ -229,10 +266,15 @@ export class PeerMesh {
 
   /** Restart connections that never got an answer or that broke. */
   private checkConnections() {
+    if (!this.isReady || this.stopped) return;
     const now = Date.now();
     this.peers.forEach((peer, id) => {
       const state = peer.pc.connectionState;
-      const broken = state === "failed" || state === "closed";
+      const broken =
+        state === "failed" ||
+        state === "closed" ||
+        (peer.droppedAt !== null && now - peer.droppedAt > DROPPED_MS) ||
+        (peer.answered && state !== "connected" && now - peer.startedAt > CONNECT_TIMEOUT_MS);
       const ignored = !peer.answered && now - peer.startedAt > ANSWER_TIMEOUT_MS;
       if (peer.offerer && (broken || ignored)) this.offer(id);
       // The other side restarts it; we just wait for their new offer.
@@ -259,8 +301,10 @@ export class PeerMesh {
         if (note.data.type === "offer") await this.answer(note.from_id, note.data);
         else if (note.data.type === "answer") await this.accept(note.from_id, note.data);
       }
-    } catch {
-      // Network hiccup: try again on the next tick.
+    } catch (e) {
+      // An old server without the signals endpoint: say so instead of trying forever.
+      if (e instanceof ApiError && (e.status === 404 || e.status === 405)) this.setStatus({ serverOutdated: true });
+      // Otherwise a network hiccup: try again on the next tick.
     }
     if (!this.stopped) this.pollTimer = setTimeout(() => this.poll(), this.settling() ? POLL_FAST_MS : POLL_SLOW_MS);
   }

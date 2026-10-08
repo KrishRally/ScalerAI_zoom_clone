@@ -34,3 +34,17 @@ DEMO_EMAIL = "alex.johnson@example.com"
 
 # Password for the seeded demo account, so reviewers can sign in straight away.
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "zoomdemo123")
+
+# ---------- WebRTC relay (TURN) ----------
+# Video between two people on strict networks (phone data, many home routers)
+# can't go direct and needs a relay. Set ONE of these on Railway:
+#  a) Cloudflare Realtime TURN (free tier): the key id and its API token.
+CLOUDFLARE_TURN_KEY_ID = os.getenv("CLOUDFLARE_TURN_KEY_ID", "")
+CLOUDFLARE_TURN_API_TOKEN = os.getenv("CLOUDFLARE_TURN_API_TOKEN", "")
+#  b) Any other TURN server (Metered, coturn...): comma separated URLs and a login.
+TURN_URLS = [u.strip() for u in os.getenv("TURN_URLS", "").split(",") if u.strip()]
+TURN_USERNAME = os.getenv("TURN_USERNAME", "")
+TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL", "")
+# Send all video through the relay, never directly. Hides people's IP addresses
+# from each other (more private) at the cost of relay traffic. Needs a TURN server.
+TURN_FORCE_RELAY = os.getenv("TURN_FORCE_RELAY", "false").lower() in ("1", "true", "yes")

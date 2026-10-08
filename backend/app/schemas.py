@@ -248,6 +248,14 @@ class SignalOut(BaseModel):
     data: dict
 
 
+class IceServersOut(BaseModel):
+    ice_servers: list[dict]
+    # False means STUN only: people on strict networks may not see each other's video.
+    has_relay: bool
+    # Send everything through the relay (TURN_FORCE_RELAY).
+    relay_only: bool = False
+
+
 class JoinResult(ParticipantOut):
     """Returned once, when joining. The token proves who you are for every later action."""
 

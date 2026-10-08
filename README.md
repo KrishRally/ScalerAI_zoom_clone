@@ -110,7 +110,7 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 
 1. The person with the **lower participant id** creates an **offer**: what it will send (mic, camera, screen) and its network addresses (found with Google's public STUN server). It posts it to `POST /api/participants/{id}/signals`.
 2. The other person collects it from `GET /api/participants/{id}/signals` (checked every 0.7 s while connecting, 2.5 s otherwise), creates an **answer** and posts it back.
-3. The browsers connect directly and media flows.
+3. The browsers connect directly and media flows. If their networks don't allow that, media goes through a TURN relay instead (see "Assumptions and limits").
 
 Each connection has three fixed slots: mic, camera and screen. Muting disables the mic track; camera off, switching devices and screen sharing just swap the track in a slot (`replaceTrack`), so nothing has to be renegotiated. A connection that gets no answer in 10 s, or breaks, is started again automatically. Using the lower id as the one who offers means two people never offer to each other at the same time. Notes are deleted once delivered (or after 2 minutes).
 
@@ -360,6 +360,7 @@ Interactive docs are at `/docs` on the backend.
 | PATCH | `/api/participants/{id}` | Update your own mic, camera, raised hand, screen sharing or name (host rules apply) |
 | POST | `/api/participants/{id}/signals` | WebRTC: leave an offer or answer for another participant |
 | GET | `/api/participants/{id}/signals` | WebRTC: collect (and delete) the notes left for you |
+| GET | `/api/participants/{id}/ice-servers` | WebRTC: STUN and TURN relay servers to use (TURN logins only for people in a meeting) |
 | POST | `/api/participants/{id}/leave` | Leave the meeting |
 | POST | `/api/participants/{id}/mute` | Host: mute one person |
 | POST | `/api/participants/{id}/remove` | Host: remove one person (from the meeting or waiting room) |
@@ -434,6 +435,7 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
    - `FRONTEND_URL` = your Vercel URL, for example `https://your-app.vercel.app`
    - `CORS_ORIGINS` = the same Vercel URL
    - Optional: `DEMO_PASSWORD` to change the demo account's password
+   - For video calls across strict networks: `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` (or `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`). See "Assumptions and limits".
 5. Under **Settings > Networking**, click **Generate Domain**. Check `https://<domain>/api/health` returns `{"status":"ok"}`.
 
 **Frontend on Vercel**
@@ -449,7 +451,11 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 - **The sign in token is kept in `localStorage`.** The API is on a different domain from the site, so a cookie would need cross-site cookie setup. The trade-off is that a cross-site scripting bug could read the token; React escapes all output, and sessions expire after 30 days.
 - **Who is host:** the signed in owner of the meeting. People who join with an invite link, with or without an account, join as attendees. The host can hand over the role, and the owner gets it back if they rejoin.
 - **Mesh WebRTC, sized for small meetings.** Each person sends their video to every other person, so upload grows with the meeting size. That is fine for a handful of people; large meetings would need a media server (an SFU such as LiveKit or mediasoup) that receives each stream once and forwards it.
-- **STUN only by default.** Most home and office networks connect fine. Some strict networks (certain corporate firewalls, some mobile carriers) need a TURN relay server. Add one with `NEXT_PUBLIC_ICE_SERVERS` on Vercel, for example `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:your.turn.server:3478","username":"...","credential":"..."}]`. Without TURN, people on such networks still see everyone's name tile, chat and reactions, but not their video.
+- **Strict networks need a TURN relay.** Without one, two people on phone data or behind many home routers stay on "Connecting..." (STUN alone can't get through). The server hands out relay logins from `GET /api/participants/{id}/ice-servers` (only to people in a meeting, so they aren't public). Set one option on Railway:
+  - **Cloudflare (free tier, recommended):** in the Cloudflare dashboard open **Realtime > TURN Server > Create**, then set `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN`. The server asks Cloudflare for short lived logins and reuses them for an hour.
+  - **Any other TURN server** (Metered, your own coturn): `TURN_URLS` (comma separated), `TURN_USERNAME`, `TURN_CREDENTIAL`.
+  - Optional `TURN_FORCE_RELAY=true` sends all media through the relay, which hides people's IP addresses from each other.
+  If no relay is set up and someone can't connect after about 25 seconds, the room says so in a bar at the top.
 - **Signalling uses polling**, like the rest of the room. Connecting takes about 1 to 3 seconds. WebSockets would make it near instant.
 - **Browsers may block sound until you click.** If that happens, a "Click to hear the other participants" bar appears.
 - **Notes are private.** Only the person who wrote them can read them.
@@ -466,7 +472,7 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 
 ## What I would add next
 
-- A TURN server for strict networks, and an SFU media server for large meetings
+- An SFU media server for large meetings
 - Virtual backgrounds and background blur (MediaPipe selfie segmentation)
 - WebSockets for instant updates
 - Email verification codes and "forgot password" (needs an email service such as Resend or SendGrid)

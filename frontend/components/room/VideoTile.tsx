@@ -9,8 +9,9 @@ interface Props {
   isMe: boolean;
   /** Our camera, or theirs arriving over WebRTC. */
   stream?: MediaStream | null;
-  /** Still setting up the connection to this person. */
+  /** Still setting up the connection to this person, or it failed. */
   connecting?: boolean;
+  failed?: boolean;
   speaking?: boolean;
   /** A floating emoji. The id changes for every new reaction so the animation restarts. */
   reaction?: { emoji: string; id: number } | null;
@@ -27,6 +28,7 @@ export default function VideoTile({
   stream,
   speaking,
   connecting,
+  failed,
   reaction,
   width,
   height,
@@ -56,8 +58,10 @@ export default function VideoTile({
         </div>
       )}
 
-      {connecting && (
-        <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-[#D0D0D0]">Connecting...</span>
+      {(connecting || failed) && (
+        <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-[#D0D0D0]">
+          {failed ? "Can't connect, retrying..." : "Connecting..."}
+        </span>
       )}
 
       {/* Green border while talking */}

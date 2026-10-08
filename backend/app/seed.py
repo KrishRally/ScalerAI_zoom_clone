@@ -23,6 +23,7 @@ from app.models import (
     Document,
     DocumentMember,
     Meeting,
+    MeetingSettings,
     MeetingStatus,
     MeetingType,
     Participant,
@@ -90,6 +91,7 @@ def _add_upcoming_samples(db: Session, me: User, now) -> None:
                 # Round to the hour or half hour like a real calendar.
                 scheduled_start=start.replace(minute=0 if start.minute < 30 else 30, second=0, microsecond=0),
                 duration_minutes=duration,
+                settings=MeetingSettings(),
             )
         )
         db.flush()  # so the next meeting code is checked against this one
@@ -152,6 +154,7 @@ def seed_database(db: Session) -> None:
             started_at=started,
             ended_at=ended,
             created_at=started - timedelta(minutes=5),
+            settings=MeetingSettings(),
         )
         db.add(meeting)
         db.flush()

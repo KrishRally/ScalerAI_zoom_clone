@@ -202,6 +202,10 @@ export const api = {
   // ---------- WebRTC signalling: connection notes passed between browsers ----------
   sendSignal: (participantId: number, to: number, data: SignalData) =>
     postAs<void>(participantId, `/api/participants/${participantId}/signals`, { to, data }),
+  iceServers: (participantId: number) =>
+    request<{ ice_servers: unknown[]; has_relay: boolean; relay_only: boolean }>(`/api/participants/${participantId}/ice-servers`, {
+      headers: asParticipant(participantId),
+    }),
   takeSignals: (participantId: number) =>
     request<{ id: number; from_id: number; data: SignalData }[]>(`/api/participants/${participantId}/signals`, {
       headers: asParticipant(participantId),
