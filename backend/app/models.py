@@ -154,6 +154,9 @@ class Participant(Base):
     # A random id each browser tab keeps, so rejoining from the same tab
     # replaces the old entry instead of showing the person twice.
     client_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # A random id the whole browser keeps (all tabs). Used to keep a removed
+    # guest out, since a guest has no account to recognise them by.
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Hash of the secret key given to this participant when they joined.
     # Every action they take in the room must come with that key.
     token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

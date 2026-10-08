@@ -578,3 +578,19 @@ def test_only_one_person_shares_at_a_time(client, start_instant):
     assert people[host["id"]]["is_sharing_screen"] is False  # the new share took over
     assert people[host["id"]]["share_with_video"] is False
 
+
+
+def test_removed_people_cannot_rejoin(client, auth, start_instant):
+    meeting, host = start_instant()
+    code = meeting["meeting_code"]
+    guest = _guest(client, meeting, "Rex", device_id="browser-1", client_id="tab-1").json()
+    _host_action(client, f"/api/participants/{guest['id']}/remove", host)
+
+    # Same browser, even from a new tab, is refused.
+    again = _guest(client, meeting, "Rex", device_id="browser-1", client_id="tab-2")
+    assert again.status_code == 403 and "removed" in again.json()["detail"]
+    # Someone else can still join.
+    assert _guest(client, meeting, "Ana", device_id="browser-2", client_id="tab-3").status_code == 201
+    # The host can always come back.
+    back = client.post(f"/api/meetings/{code}/join", json={"display_name": "Alex Johnson"}, headers=auth)
+    assert back.status_code == 201

@@ -3,7 +3,7 @@ and the live room state each browser polls."""
 
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -105,6 +105,8 @@ def join_meeting(
         raise Forbidden("Incorrect meeting passcode")
     if settings.is_locked and not is_owner:
         raise Forbidden("This meeting has been locked by the host")
+    if not is_owner and _was_removed(db, meeting, user, data):
+        raise Forbidden("You were removed from this meeting by the host and can't rejoin")
 
     now = utcnow()
 
@@ -144,6 +146,7 @@ def join_meeting(
         role=ParticipantRole.host if (is_owner or was_host) else ParticipantRole.attendee,
         status=ParticipantStatus.waiting if goes_to_waiting_room else ParticipantStatus.in_meeting,
         client_id=data.client_id,
+        device_id=data.device_id,
         is_muted=is_muted,
         is_video_on=is_video_on,
         joined_at=now,
@@ -155,6 +158,32 @@ def join_meeting(
     return schemas.JoinResult(
         **schemas.ParticipantOut.model_validate(participant).model_dump(),
         participant_token=token,
+    )
+
+
+def _was_removed(db: Session, meeting: Meeting, user: User | None, data: schemas.JoinRequest) -> bool:
+    """Like Zoom, someone the host removed can't come back into the same meeting.
+
+    We recognise them by their account, or (for guests) by their browser.
+    """
+    same_person = []
+    if user is not None:
+        same_person.append(Participant.user_id == user.id)
+    if data.device_id:
+        same_person.append(Participant.device_id == data.device_id)
+    if data.client_id:
+        same_person.append(Participant.client_id == data.client_id)
+    if not same_person:
+        return False
+    return (
+        db.scalar(
+            select(Participant.id).where(
+                Participant.meeting_id == meeting.id,
+                Participant.status == ParticipantStatus.removed,
+                or_(*same_person),
+            )
+        )
+        is not None
     )
 
 

@@ -99,6 +99,20 @@ export function saveShowPreview(on: boolean) {
 // which is per tab, so two tabs can still be two different people.
 const CLIENT_ID_KEY = "zoom-client-id";
 
+/** A random id the whole browser keeps (all tabs), so the host's "remove" sticks for guests too. */
+export function getDeviceId(): string {
+  try {
+    let id = localStorage.getItem("zoom-device-id");
+    if (!id) {
+      id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem("zoom-device-id", id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
+
 export function getClientId(): string {
   try {
     let id = sessionStorage.getItem(CLIENT_ID_KEY);

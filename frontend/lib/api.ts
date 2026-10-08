@@ -23,7 +23,7 @@ import type {
   User,
   UserSettings,
 } from "./types";
-import { getAuthToken, getClientId, getParticipantToken } from "./session";
+import { getAuthToken, getClientId, getDeviceId, getParticipantToken } from "./session";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
@@ -165,7 +165,11 @@ export const api = {
   // ---------- Inside a meeting ----------
   // Joining sends the sign in token (if any); the server decides who is host from it.
   joinMeeting: (c: string, input: JoinInput) =>
-    post<JoinResult>(`/api/meetings/${code(c)}/join`, { client_id: getClientId() || undefined, ...input }),
+    post<JoinResult>(`/api/meetings/${code(c)}/join`, {
+      client_id: getClientId() || undefined,
+      device_id: getDeviceId() || undefined,
+      ...input,
+    }),
   roomState: (c: string, participantId: number, afterMessageId: number) =>
     request<RoomState>(
       `/api/meetings/${code(c)}/state?participant_id=${participantId}&after_message_id=${afterMessageId}`,

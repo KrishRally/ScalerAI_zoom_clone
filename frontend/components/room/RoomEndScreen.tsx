@@ -4,7 +4,7 @@ import type { RoomEnd } from "@/hooks/useMeetingRoom";
 
 const MESSAGES: Record<RoomEnd, { title: string; body: string }> = {
   ended: { title: "This meeting has been ended by host", body: "Thank you for attending." },
-  removed: { title: "You have been removed from this meeting", body: "The host removed you from the meeting." },
+  removed: { title: "You have been removed from this meeting", body: "The host removed you from the meeting, so you can't rejoin it." },
   left: { title: "You left the meeting", body: "You were disconnected because the connection was lost." },
   missing: { title: "This meeting is no longer available", body: "The meeting may have been deleted by the host." },
 };
