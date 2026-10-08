@@ -12,9 +12,17 @@ export interface ShareChoice {
   withVideo: boolean;
 }
 
+// Phone browsers (Safari on iPhone, Chrome on Android) don't let websites
+// capture the screen at all, so sharing only works from a computer.
+export const SHARE_UNSUPPORTED = "Screen sharing works from a computer. Phone browsers don't allow websites to share the screen.";
+
+export function canShareScreen(): boolean {
+  return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
+}
+
 /** Ask the browser for the screen, window or tab. Must run straight after a click. */
 export async function captureScreen(choice: ShareChoice): Promise<MediaStream> {
-  if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("Screen sharing is not supported on this device");
+  if (!canShareScreen()) throw new Error(SHARE_UNSUPPORTED);
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: { displaySurface: choice.surface, frameRate: choice.optimizeVideo ? 30 : 15 },
     audio: choice.shareSound,

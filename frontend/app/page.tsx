@@ -13,6 +13,7 @@ import RecentMeetingRow from "@/components/home/RecentMeetingRow";
 import { CameraIcon, JoinIcon, NotesIcon, ScheduleIcon, ShareIcon } from "@/components/home/TileIcons";
 import JoinMeetingModal from "@/components/modals/JoinMeetingModal";
 import ShareScreenModal from "@/components/modals/ShareScreenModal";
+import { canShareScreen, SHARE_UNSUPPORTED } from "@/lib/shareScreen";
 import Spinner from "@/components/ui/Spinner";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
@@ -101,7 +102,7 @@ function Dashboard() {
             <ActionTile
               label="Share screen"
               icon={ShareIcon}
-              onClick={() => setShareOpen(true)}
+              onClick={() => (canShareScreen() ? setShareOpen(true) : toast(SHARE_UNSUPPORTED, "info"))}
             />
             <ActionTile label="My Notes" icon={NotesIcon} onClick={() => router.push("/docs")} />
           </div>

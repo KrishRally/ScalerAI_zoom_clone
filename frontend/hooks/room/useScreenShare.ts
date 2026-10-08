@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
-import { takePendingShare } from "@/lib/shareScreen";
+import { canShareScreen, SHARE_UNSUPPORTED, takePendingShare } from "@/lib/shareScreen";
 import type { Participant } from "@/lib/types";
 
 interface Options {
@@ -74,7 +74,7 @@ export function useScreenShare({ code, pid, me, participants, blocked }: Options
   const toggleShare = () => {
     if (screen) return stopShare();
     if (blocked) return toast("The host has disabled screen sharing", "info");
-    if (!navigator.mediaDevices?.getDisplayMedia) return toast("Screen sharing is not supported on this device", "error");
+    if (!canShareScreen()) return toast(SHARE_UNSUPPORTED, "info");
     setPickerOpen(true);
   };
 

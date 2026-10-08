@@ -10,7 +10,6 @@ A video meeting web app that looks and works like **Zoom Workplace**. Start a me
 | **API docs** (Swagger) | https://scaleraizoomclone-production.up.railway.app/docs |
 | **Sign in** | Not needed. The app opens signed in as the demo user **Alex Johnson** (`alex.johnson@example.com` / `zoomdemo123`), who already has meetings. You can also sign up with your own email. |
 
-<!-- 📸 SCREENSHOT 1 (hero): the Home page on desktop. Save it as docs/screenshots/home.png -->
 ![Home page](docs/screenshots/home.png)
 
 ---
@@ -52,11 +51,6 @@ A short tour of the main features. Everything happens on the live app.
 
 ## Screenshots
 
-<!--
-📸 Add your screenshots to docs/screenshots/ with exactly these file names.
-Each image below will appear automatically once its file is there.
--->
-
 | | |
 |---|---|
 | ![Meetings page](docs/screenshots/meetings.png) <br> **Meetings:** month calendar and day by day agenda | ![Meeting room](docs/screenshots/meeting-room.png) <br> **Meeting room:** two people, Zoom style toolbar |
@@ -91,7 +85,7 @@ Each image below will appear automatically once its file is there.
 - **Accounts:** sign up with any email, sign in, sign out, change password. Passwords are hashed and sessions can be revoked.
 - **Settings:** profile, password, meeting defaults, and a microphone and camera test.
 - **Meetings page** with a month calendar and an agenda, **Calendar** week view (click an empty slot to schedule), **Team Chat** (channels and direct messages), **Docs** (templates, autosave, sharing as editor or viewer), **notifications** and **search**.
-- **Works on phones, tablets and desktops.**
+- **Works on phones, tablets and desktops.** On a phone you get bottom tabs, a compact meeting toolbar and full screen panels. You can start, join and schedule meetings, talk on video, chat, react and use every host control. The one thing a phone can't do is share its screen (see [Assumptions and limits](#assumptions-and-limits)).
 
 ---
 
@@ -460,10 +454,11 @@ The frontend is checked with TypeScript and ESLint (`npm run lint`), and the mai
 
 ## Assumptions and limits
 
-- **A default user is signed in**, as the brief asks. Everyone who uses the live app without signing up shares the demo account, so they see each other's meetings. People opening an **invite link** are not signed in: they join as guests with their own name, like Zoom.
+- **A default user is signed in**, as the brief asks. Everyone who uses the live app without signing up shares the demo account, so they see each other's meetings. People opening an **invite link** join as guests with their own name, like Zoom, even in a browser that is signed in as the host.
 - **Video calls are for people on the same Wi-Fi network.** On one network browsers can always reach each other directly. Across different networks (for example phone data), some routers block direct connections, which would need a TURN relay server; this project leaves that out on purpose. If someone can't be reached, the room says so, and chat, reactions and everything else keep working.
 - **Calls are built for small meetings.** Each person sends their video to every other person (a "mesh"), which is fine for a handful of people. Large meetings would need a media server (an SFU such as LiveKit).
 - **Polling, not WebSockets.** Updates arrive within about 2 seconds and calls take 1 to 3 seconds to connect. WebSockets would make this near instant.
+- **Screen sharing needs a computer.** Phone browsers (Safari on iPhone, Chrome on Android) don't let any website capture the screen; Zoom's phone app can only do it because it is a native app. On a phone the Share button explains this. People on phones still see a screen shared from a computer.
 - **Screen picking:** browsers don't let a website list your windows, so after choosing Screen, Window or Browser tab, the browser shows its own list to pick the exact one.
 - **Browsers may block sound until you click.** If so, a "Click to hear the other participants" bar appears.
 - **Accounts:** any email can sign up. Emails aren't verified and there is no "forgot password" yet (both need an email service). The sign-in token is kept in the browser's storage because the site and API are on different domains.
