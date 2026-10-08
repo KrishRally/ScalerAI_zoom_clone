@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, setUnauthorizedHandler } from "@/lib/api";
-import { clearAuthToken, getAuthToken, saveAuthToken } from "@/lib/session";
+import { clearAuthToken, getAuthToken, markSignedOut, saveAuthToken } from "@/lib/session";
 import type { User, UserSettings } from "@/lib/types";
 
 interface AuthState {
@@ -65,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishSignIn = useCallback(async (token: string, signedIn: User) => {
     saveAuthToken(token);
+    markSignedOut(false);
     setUser(signedIn);
     setSettings(await api.getUserSettings());
   }, []);
@@ -84,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       signOut: async () => {
         await api.signOut().catch(() => {});
+        markSignedOut(true);
         forget();
       },
       setUser,

@@ -163,3 +163,24 @@ export function getParticipantToken(participantId: number): string | null {
     return null;
   }
 }
+
+// The brief says a default user is signed in. We sign in as the demo account
+// automatically, unless this browser chose "Sign out" (then we show Sign in).
+const SIGNED_OUT_KEY = "zoom-signed-out";
+
+export function markSignedOut(signedOut: boolean) {
+  try {
+    if (signedOut) localStorage.setItem(SIGNED_OUT_KEY, "1");
+    else localStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {
+    // Storage blocked: we'll just sign in as the demo user again next time.
+  }
+}
+
+export function choseSignOut(): boolean {
+  try {
+    return localStorage.getItem(SIGNED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}

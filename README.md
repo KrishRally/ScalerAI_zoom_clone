@@ -4,7 +4,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 
 - **Live app:** https://scaleraizoomclone-frontend.vercel.app
 - **API docs (Swagger):** https://scaleraizoomclone-production.up.railway.app/docs
-- **Demo account:** `alex.johnson@example.com` / `zoomdemo123` (already has meetings). Or sign up with your own email.
+- **No login needed:** opening the app signs you in as the default user, Alex Johnson (`alex.johnson@example.com` / `zoomdemo123`), who already has meetings. Sign up with your own email if you like.
 
 ## Tech stack
 
@@ -21,7 +21,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 
 **Accounts (bonus)**
 - **Sign up** with your name, any real email address and a password, **sign in**, and **sign out**. No restrictions on who can sign up. Emails are checked for a valid format and are case-insensitive (`Krish@Gmail.com` and `krish@gmail.com` are the same account).
-- The dashboard, Meetings and Settings pages need an account; signed out visitors are sent to Sign in and brought back afterwards. **Guests can still join a meeting from an invite link without an account**, like Zoom.
+- **A default user is assumed, as the brief asks.** Opening any page signs you in as the demo user automatically. After you press **Sign out**, the app remembers it and shows Sign in instead (and brings you back to the page you wanted). **Guests opening an invite link are not signed in**: they type their own name and join without an account, like Zoom.
 - **Settings page:** change your name and profile colour, change your password (signs out your other devices), meeting defaults (start with video, join muted, always show preview, waiting room and mute on entry for new meetings), and test and pick your microphone and camera.
 
 **Team Chat, Calendar and Docs (bonus)**
@@ -358,7 +358,7 @@ npm install
 cp .env.example .env.local       # NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
-Open http://localhost:3000 and sign in with the demo account (`alex.johnson@example.com` / `zoomdemo123`) or sign up. To try two people in one meeting, open the invite link in a private window or another tab; guests don't need an account.
+Open http://localhost:3000: you are signed in as the demo user straight away. You can also sign out and sign up with your own email. To try two people in one meeting, open the invite link in a private window or another tab; guests don't need an account.
 
 ## Deployment
 
@@ -381,6 +381,7 @@ Open http://localhost:3000 and sign in with the demo account (`alex.johnson@exam
 
 ## Assumptions and limits
 
+- **Default user.** The brief says to assume a logged in user, so pages that need an account sign in as the seeded demo user when nobody is signed in (`RequireAuth`). Everyone using the live app without signing up shares that one account, so they see each other's meetings. Invite link pages skip this, so guests stay guests.
 - **Email and password sign in.** Any email can sign up. Emails are not verified with a code, and there is no "forgot password" yet: both need an email sending service (see "What I would add next").
 - **The sign in token is kept in `localStorage`.** The API is on a different domain from the site, so a cookie would need cross-site cookie setup. The trade-off is that a cross-site scripting bug could read the token; React escapes all output, and sessions expire after 30 days.
 - **Who is host:** the signed in owner of the meeting. People who join with an invite link, with or without an account, join as attendees. The host can hand over the role, and the owner gets it back if they rejoin.
