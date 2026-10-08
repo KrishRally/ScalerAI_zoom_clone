@@ -16,7 +16,12 @@ from sqlalchemy.orm import Session
 
 from app.config import DEMO_PASSWORD
 from app.models import (
+    ChannelMember,
+    ChannelMessage,
+    ChatChannel,
     ChatMessage,
+    Document,
+    DocumentMember,
     Meeting,
     MeetingStatus,
     MeetingType,
@@ -169,4 +174,84 @@ def seed_database(db: Session) -> None:
             )
         )
 
+    db.commit()
+
+
+def _seed_users(db: Session) -> dict[str, User]:
+    return {u.email: u for u in db.scalars(select(User)).all()}
+
+
+def seed_team_chat(db: Session) -> None:
+    """A "General" channel with everyone, a project channel and a direct message."""
+    if db.scalar(select(ChatChannel.id).limit(1)) is not None:
+        return
+    users = _seed_users(db)
+    me = users.get(DEFAULT_USER_EMAIL)
+    if me is None:
+        return
+    by_name = {u.name: u for u in users.values()}
+    priya, daniel, sara = by_name.get("Priya Sharma"), by_name.get("Daniel Kim"), by_name.get("Sara Lopez")
+    now = utcnow()
+
+    def channel(name, members, is_default=False, is_direct=False):
+        c = ChatChannel(name=name, is_default=is_default, is_direct=is_direct, created_by=me.id)
+        c.members = [ChannelMember(user_id=u.id) for u in members if u]
+        db.add(c)
+        db.flush()
+        return c
+
+    def say(c, user, text, minutes_ago):
+        if user:
+            db.add(ChannelMessage(channel_id=c.id, user_id=user.id, content=text, created_at=now - timedelta(minutes=minutes_ago)))
+
+    general = channel("General", list(users.values()), is_default=True)
+    say(general, priya, "Good morning everyone! Standup is at 10.", 180)
+    say(general, daniel, "Thanks Priya. I'll share the dashboard mockups there.", 175)
+    say(general, me, "Sounds good, see you all soon.", 170)
+
+    project = channel("Dashboard v2", [me, priya, daniel])
+    say(project, daniel, "First draft of the new dashboard is in Docs.", 90)
+    say(project, priya, "Looks great. Can we review it in the design meeting?", 60)
+
+    dm = channel(None, [me, priya], is_direct=True)
+    say(dm, priya, "Hey Alex, do you have a minute before our 1:1?", 30)
+    say(dm, me, "Sure, call me after lunch.", 25)
+    if sara:
+        say(general, sara, "Reminder: the client demo is on Monday.", 15)
+    db.commit()
+
+
+def seed_docs(db: Session) -> None:
+    """A couple of documents for the demo account, one shared by a teammate."""
+    if db.scalar(select(Document.id).limit(1)) is not None:
+        return
+    users = _seed_users(db)
+    me = users.get(DEFAULT_USER_EMAIL)
+    priya = next((u for u in users.values() if u.name == "Priya Sharma"), None)
+    if me is None:
+        return
+    db.add(
+        Document(
+            owner_id=me.id,
+            updated_by=me.id,
+            title="Q4 Planning",
+            content=(
+                "Goals\n"
+                "- Launch Dashboard v2\n"
+                "- Cut page load time in half\n"
+                "- Hire two frontend engineers\n\n"
+                "Open questions\n"
+                "- Do we need a beta period for the new dashboard?\n"
+            ),
+        )
+    )
+    if priya:
+        shared = Document(
+            owner_id=priya.id,
+            updated_by=priya.id,
+            title="Design Review notes",
+            content="Attendees: Priya, Alex, Daniel\n\nDecisions\n- Keep the blue header\n- Move filters to the left\n",
+        )
+        shared.members = [DocumentMember(user_id=me.id, can_edit=True)]
+        db.add(shared)
     db.commit()

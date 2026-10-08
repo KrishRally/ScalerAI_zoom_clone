@@ -33,6 +33,20 @@ def recent_meetings(db: Session = Depends(get_db), user: User = Depends(get_curr
     ]
 
 
+@router.get("/calendar", response_model=list[schemas.MeetingOut])
+def calendar(
+    start: schemas.UTCInput,
+    end: schemas.UTCInput,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Meetings between two times, for the Calendar page."""
+    return [
+        meeting_service.to_meeting_out(db, m)
+        for m in meeting_service.list_in_range(db, user, start, end)
+    ]
+
+
 @router.post(
     "/instant", response_model=schemas.MeetingOut, status_code=status.HTTP_201_CREATED
 )

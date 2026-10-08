@@ -365,3 +365,112 @@ class RoomState(BaseModel):
 
 
 MeetingOut.model_rebuild()
+
+
+# ---------- People (for Team Chat and sharing) ----------
+
+
+class PersonOut(ORMModel):
+    id: int
+    name: str
+    email: str
+    avatar_color: str
+
+
+# ---------- Team Chat ----------
+
+
+class ChannelCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    member_ids: list[int] = Field(default_factory=list, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        value = " ".join(value.split()).lstrip("#")
+        if not value:
+            raise ValueError("Channel name cannot be empty")
+        return value
+
+
+class DirectMessageCreate(BaseModel):
+    user_id: int
+
+
+class ChannelMessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("content")
+    @classmethod
+    def _content(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Message cannot be empty")
+        return value
+
+
+class ChannelMessageOut(BaseModel):
+    id: int
+    channel_id: int
+    sender: PersonOut
+    content: str
+    created_at: UTCOutput
+
+
+class ChannelOut(BaseModel):
+    id: int
+    # For direct messages this is the other person's name.
+    name: str
+    is_direct: bool
+    is_default: bool
+    members: list[PersonOut]
+    unread_count: int
+    last_message: ChannelMessageOut | None
+
+
+class ChannelMembersAdd(BaseModel):
+    user_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class UnreadOut(BaseModel):
+    unread: int
+
+
+# ---------- Docs ----------
+
+
+class DocumentCreate(BaseModel):
+    title: str = Field(default="Untitled", max_length=200)
+    content: str = Field(default="", max_length=200_000)
+
+
+class DocumentUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    content: str | None = Field(default=None, max_length=200_000)
+
+
+class DocumentMemberOut(BaseModel):
+    user: PersonOut
+    can_edit: bool
+
+
+class DocumentSummary(BaseModel):
+    id: int
+    title: str
+    snippet: str
+    owner: PersonOut
+    is_owner: bool
+    can_edit: bool
+    shared: bool
+    updated_at: UTCOutput
+    updated_by_name: str | None
+
+
+class DocumentOut(DocumentSummary):
+    content: str
+    members: list[DocumentMemberOut]
+
+
+class DocumentShare(BaseModel):
+    email: EmailStr
+    can_edit: bool = True

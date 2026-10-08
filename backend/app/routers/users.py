@@ -6,6 +6,7 @@ from app.database import get_db
 from app.dependencies import bearer_token, get_current_user
 from app.models import User
 from app.services import auth as auth_service
+from app.services import team_chat as chat_service
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -13,6 +14,12 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 @router.get("/me", response_model=schemas.UserOut)
 def read_me(user: User = Depends(get_current_user)):
     return user
+
+
+@router.get("/search", response_model=list[schemas.PersonOut])
+def search(q: str = "", db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """Find people with an account by name or email."""
+    return chat_service.search_people(db, q)
 
 
 @router.patch("/me", response_model=schemas.UserOut)

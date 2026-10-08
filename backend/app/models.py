@@ -9,6 +9,13 @@
     users ──< auth_sessions            (one row per signed in browser)
     users ──1 user_settings            (personal defaults)
 
+Team Chat:
+    chat_channels ──< channel_members >── users
+    chat_channels ──< channel_messages >── users
+
+Docs:
+    users ──< documents ──< document_members >── users
+
 All times are stored in UTC.
 """
 
@@ -278,3 +285,101 @@ class UserSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     user: Mapped[User] = relationship(back_populates="settings")
+
+
+# ---------------------------------------------------------------- Team Chat
+
+
+class ChatChannel(Base):
+    """A Team Chat conversation: a named channel, or a direct message between people."""
+
+    __tablename__ = "chat_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Empty for direct messages; their name is the other person's name.
+    name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    is_direct: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The "General" channel every user is added to.
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    members: Mapped[list["ChannelMember"]] = relationship(
+        back_populates="channel", cascade="all, delete-orphan"
+    )
+
+
+class ChannelMember(Base):
+    """Who is in a channel, and how far they have read (for unread counts)."""
+
+    __tablename__ = "channel_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("chat_channels.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Messages with a higher id than this are unread.
+    last_read_message_id: Mapped[int] = mapped_column(Integer, default=0)
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    channel: Mapped[ChatChannel] = relationship(back_populates="members")
+    user: Mapped[User] = relationship()
+
+    __table_args__ = (Index("ux_channel_member", "channel_id", "user_id", unique=True),)
+
+
+class ChannelMessage(Base):
+    __tablename__ = "channel_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("chat_channels.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    user: Mapped[User] = relationship()
+
+    __table_args__ = (Index("ix_channel_messages_channel_id", "channel_id", "id"),)
+
+
+# ---------------------------------------------------------------- Docs
+
+
+class Document(Base):
+    """A Zoom Docs style document."""
+
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200), default="Untitled")
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    owner: Mapped[User] = relationship(foreign_keys=[owner_id])
+    editor: Mapped[User | None] = relationship(foreign_keys=[updated_by])
+    members: Mapped[list["DocumentMember"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class DocumentMember(Base):
+    """Someone a document is shared with. The owner is not listed here."""
+
+    __tablename__ = "document_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    can_edit: Mapped[bool] = mapped_column(Boolean, default=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    document: Mapped[Document] = relationship(back_populates="members")
+    user: Mapped[User] = relationship()
+
+    __table_args__ = (Index("ux_document_member", "document_id", "user_id", unique=True),)

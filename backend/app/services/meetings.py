@@ -207,3 +207,28 @@ def end_meeting(db: Session, meeting: Meeting) -> Meeting:
     db.commit()
     db.refresh(meeting)
     return meeting
+
+
+def list_in_range(db: Session, user: User, start, end) -> list[Meeting]:
+    """Meetings to show on the calendar between two times.
+
+    Scheduled meetings use their planned start; instant meetings use when they started.
+    """
+    scheduled = db.scalars(
+        select(Meeting).where(
+            Meeting.host_id == user.id,
+            Meeting.scheduled_start.is_not(None),
+            Meeting.scheduled_start >= start,
+            Meeting.scheduled_start < end,
+        )
+    ).all()
+    instant = db.scalars(
+        select(Meeting).where(
+            Meeting.host_id == user.id,
+            Meeting.scheduled_start.is_(None),
+            Meeting.started_at.is_not(None),
+            Meeting.started_at >= start,
+            Meeting.started_at < end,
+        )
+    ).all()
+    return sorted([*scheduled, *instant], key=lambda m: m.scheduled_start or m.started_at)
