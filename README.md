@@ -392,16 +392,28 @@ backend/
     schemas.py         Pydantic request/response shapes
     dependencies.py    who is signed in (bearer token) and the participant key header
     seed.py            sample users, meetings, chats and docs
-    routers/           thin HTTP layer: auth, users, meetings, participants, team_chat, documents
-    services/          business rules: auth, security, meetings, participants, team_chat, documents, codes, errors
+    routers/           thin HTTP layer: auth, users, meetings, participants, team_chat, documents, notifications
+    services/          business rules, one file per topic:
+      meetings.py        create, schedule, look up, list, end
+      participants.py    join, waiting room, leave, check in, change yourself, live room state
+      host_controls.py   mute, remove, admit, rename, make host, settings, suspend, end for all
+      meeting_chat.py    in-meeting chat and reactions
+      notes.py           private meeting notes
+      signals.py         WebRTC offers and answers between browsers
+      auth.py, security.py, team_chat.py, documents.py, notifications.py, codes.py, errors.py
   tests/               test_api.py (accounts, meetings, rooms), test_workspace.py (chat, docs, calendar)
 frontend/
   app/                 pages: / (home), /meetings, /chat, /calendar, /docs, /docs/[id], /settings,
                        /signin, /signup, /join, /j/[code] (preview window), /meeting/[code] (room)
-  components/          ui/, layout/, home/, modals/, meetings/, room/, chat/, calendar/, docs/, settings/, auth/, providers/
-  hooks/               useMeetings, useStartMeeting, useMeetingRoom, useLocalMedia, useGalleryLayout, ...
-  lib/                 api.ts (all backend calls), types.ts, format.ts, session.ts, calendar.ts, docTemplates.ts
+  components/          ui/, layout/, home/, modals/, meetings/, room/, share/, chat/, calendar/, docs/, settings/, auth/, providers/
+  hooks/               useMeetings, useStartMeeting, useMeetingRoom, useLocalMedia, usePeerMesh, useSpeaking, ...
+    room/              the meeting room's logic, one hook per job: useScreenShare, useMeetingCall,
+                       useHostActions, useMediaSync, useRoomNotices, useUnreadCount
+  lib/                 api.ts (all backend calls), webrtc.ts (calls), shareScreen.ts, types.ts, format.ts,
+                       session.ts, calendar.ts, docTemplates.ts
 ```
+
+The meeting room page (`app/meeting/[code]/page.tsx`) only puts the pieces together: the top bar, the stage, side panels and toolbar are components, and each job (screen sharing, the call, host actions, keeping mic and camera in sync) is its own hook.
 
 Routers only deal with HTTP. All rules (who can join, passcode checks, host checks, when a meeting ends) live in `services/`, which raise plain Python errors that `main.py` turns into HTTP responses.
 

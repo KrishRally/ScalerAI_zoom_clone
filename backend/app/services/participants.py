@@ -1,6 +1,6 @@
-"""Participant rules: join, waiting room, leave, check in, host controls, chat, reactions, notes."""
+"""Participants: joining, the waiting room, leaving, checking in, changing yourself,
+and the live room state each browser polls."""
 
-import json
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -9,24 +9,18 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.config import PARTICIPANT_TIMEOUT_SECONDS
 from app.models import (
-    ChatMessage,
     Meeting,
-    MeetingNote,
     MeetingStatus,
     Participant,
     ParticipantRole,
     ParticipantStatus,
-    Reaction,
-    Signal,
     User,
     utcnow,
 )
 from app.services.errors import BadRequest, Forbidden, NotFound
-from app.services.meetings import end_meeting, get_settings, to_meeting_out
+from app.services.meeting_chat import list_messages, recent_reactions, to_message_out
+from app.services.meetings import get_settings, to_meeting_out
 from app.services.security import hash_token, new_token
-
-# How long a reaction stays on screen.
-REACTION_SECONDS = 6
 
 
 def get_participant(db: Session, participant_id: int) -> Participant:
@@ -261,279 +255,6 @@ def update_participant(
     return participant
 
 
-# ---------- Host controls ----------
-
-
-def _require_host(db: Session, meeting: Meeting, requester_id: int) -> Participant:
-    requester = db.get(Participant, requester_id)
-    if (
-        requester is None
-        or requester.meeting_id != meeting.id
-        or requester.role != ParticipantRole.host
-        or requester.status != ParticipantStatus.in_meeting
-    ):
-        raise Forbidden("Only the host can do this")
-    return requester
-
-
-def mute_all(db: Session, meeting: Meeting, requester_id: int) -> int:
-    """Mute everyone except the host. Returns how many people were muted."""
-    host = _require_host(db, meeting, requester_id)
-    count = 0
-    for p in active_participants(db, meeting):
-        if p.id != host.id and not p.is_muted:
-            p.is_muted = True
-            count += 1
-    db.commit()
-    return count
-
-
-def host_mute(db: Session, target: Participant, requester_id: int) -> Participant:
-    _require_host(db, target.meeting, requester_id)
-    target.is_muted = True
-    db.commit()
-    db.refresh(target)
-    return target
-
-
-def remove_participant(db: Session, target: Participant, requester_id: int) -> None:
-    """Remove someone from the meeting or the waiting room."""
-    host = _require_host(db, target.meeting, requester_id)
-    if target.id == host.id:
-        raise BadRequest("The host cannot remove themselves")
-    if target.status in (ParticipantStatus.in_meeting, ParticipantStatus.waiting):
-        target.status = ParticipantStatus.removed
-        target.left_at = utcnow()
-    db.commit()
-
-
-def _admit(target: Participant) -> None:
-    now = utcnow()
-    target.status = ParticipantStatus.in_meeting
-    target.joined_at = now
-    target.last_seen_at = now
-
-
-def admit(db: Session, target: Participant, requester_id: int) -> Participant:
-    _require_host(db, target.meeting, requester_id)
-    if target.status != ParticipantStatus.waiting:
-        raise BadRequest("This person is not in the waiting room")
-    _admit(target)
-    db.commit()
-    db.refresh(target)
-    return target
-
-
-def admit_all(db: Session, meeting: Meeting, requester_id: int) -> int:
-    _require_host(db, meeting, requester_id)
-    waiting = waiting_participants(db, meeting)
-    for p in waiting:
-        _admit(p)
-    db.commit()
-    return len(waiting)
-
-
-def host_rename(db: Session, target: Participant, requester_id: int, name: str) -> Participant:
-    _require_host(db, target.meeting, requester_id)
-    target.display_name = name
-    db.commit()
-    db.refresh(target)
-    return target
-
-
-def make_host(db: Session, target: Participant, requester_id: int) -> Participant:
-    """Hand the host role to someone else. The old host becomes an attendee."""
-    host = _require_host(db, target.meeting, requester_id)
-    if target.id == host.id:
-        raise BadRequest("You are already the host")
-    if target.status != ParticipantStatus.in_meeting:
-        raise BadRequest("This person is not in the meeting")
-    host.role = ParticipantRole.attendee
-    target.role = ParticipantRole.host
-    db.commit()
-    db.refresh(target)
-    return target
-
-
-def update_settings(
-    db: Session, meeting: Meeting, data: schemas.SettingsUpdate
-) -> schemas.SettingsOut:
-    _require_host(db, meeting, data.requester_id)
-    settings = get_settings(db, meeting)
-    changes = data.model_dump(exclude_unset=True, exclude={"requester_id"})
-    for field, value in changes.items():
-        if value is not None:
-            setattr(settings, field, value)
-    # Turning screen sharing off stops everyone but the host who is sharing.
-    if changes.get("allow_screen_share") is False:
-        _stop_attendee_sharing(db, meeting)
-    # Turning the waiting room off lets everyone who was waiting in, like Zoom.
-    if changes.get("waiting_room") is False:
-        for p in waiting_participants(db, meeting):
-            _admit(p)
-    db.commit()
-    return schemas.SettingsOut.model_validate(settings)
-
-
-def _stop_attendee_sharing(db: Session, meeting: Meeting) -> None:
-    for p in active_participants(db, meeting):
-        if p.role != ParticipantRole.host:
-            p.is_sharing_screen = False
-            p.share_with_video = False
-
-
-def suspend_activities(db: Session, meeting: Meeting, requester_id: int) -> schemas.SettingsOut:
-    """Zoom's emergency button: stop everyone's audio, video and chat and lock the meeting."""
-    host = _require_host(db, meeting, requester_id)
-    settings = get_settings(db, meeting)
-    for field in (
-        "allow_chat",
-        "allow_unmute",
-        "allow_video",
-        "allow_screen_share",
-        "allow_reactions",
-        "allow_rename",
-    ):
-        setattr(settings, field, False)
-    settings.is_locked = True
-    for p in active_participants(db, meeting):
-        if p.id != host.id:
-            p.is_muted = True
-            p.is_video_on = False
-            p.is_sharing_screen = False
-            p.share_with_video = False
-    db.commit()
-    return schemas.SettingsOut.model_validate(settings)
-
-
-def end_for_all(db: Session, meeting: Meeting, requester_id: int) -> Meeting:
-    _require_host(db, meeting, requester_id)
-    for p in waiting_participants(db, meeting):
-        p.status = ParticipantStatus.left
-        p.left_at = utcnow()
-    return end_meeting(db, meeting)
-
-
-# ---------- Chat and reactions ----------
-
-
-def _require_in_meeting(meeting: Meeting, participant: Participant | None, action: str) -> Participant:
-    if (
-        participant is None
-        or participant.meeting_id != meeting.id
-        or participant.status != ParticipantStatus.in_meeting
-    ):
-        raise Forbidden(f"Only people in the meeting can {action}")
-    return participant
-
-
-def send_message(
-    db: Session, meeting: Meeting, data: schemas.ChatMessageCreate
-) -> ChatMessage:
-    sender = _require_in_meeting(meeting, db.get(Participant, data.participant_id), "send messages")
-    if sender.role != ParticipantRole.host and not get_settings(db, meeting).allow_chat:
-        raise Forbidden("The host has disabled chat")
-    message = ChatMessage(
-        meeting_id=meeting.id, participant_id=sender.id, content=data.content
-    )
-    db.add(message)
-    db.commit()
-    db.refresh(message)
-    return message
-
-
-def to_message_out(message: ChatMessage) -> schemas.ChatMessageOut:
-    return schemas.ChatMessageOut(
-        id=message.id,
-        participant_id=message.participant_id,
-        sender_name=message.participant.display_name,
-        content=message.content,
-        sent_at=message.sent_at,
-    )
-
-
-def list_messages(db: Session, meeting: Meeting, after_id: int = 0) -> list[ChatMessage]:
-    return list(
-        db.scalars(
-            select(ChatMessage)
-            .where(ChatMessage.meeting_id == meeting.id, ChatMessage.id > after_id)
-            .order_by(ChatMessage.id)
-        ).all()
-    )
-
-
-def send_reaction(db: Session, meeting: Meeting, data: schemas.ReactionCreate) -> Reaction:
-    sender = _require_in_meeting(meeting, db.get(Participant, data.participant_id), "react")
-    if sender.role != ParticipantRole.host and not get_settings(db, meeting).allow_reactions:
-        raise Forbidden("The host has disabled reactions")
-    reaction = Reaction(meeting_id=meeting.id, participant_id=sender.id, emoji=data.emoji)
-    db.add(reaction)
-    db.commit()
-    db.refresh(reaction)
-    return reaction
-
-
-def recent_reactions(db: Session, meeting: Meeting) -> list[Reaction]:
-    since = utcnow() - timedelta(seconds=REACTION_SECONDS)
-    return list(
-        db.scalars(
-            select(Reaction)
-            .where(Reaction.meeting_id == meeting.id, Reaction.created_at > since)
-            .order_by(Reaction.id)
-        ).all()
-    )
-
-
-# ---------- Notes ----------
-
-
-def _find_note(db: Session, meeting: Meeting, participant: Participant) -> MeetingNote | None:
-    query = select(MeetingNote).where(MeetingNote.meeting_id == meeting.id)
-    if participant.user_id is not None:
-        query = query.where(MeetingNote.user_id == participant.user_id)
-    else:
-        query = query.where(MeetingNote.participant_id == participant.id)
-    return db.scalar(query)
-
-
-def _note_owner(db: Session, meeting: Meeting, participant_id: int) -> Participant:
-    participant = db.get(Participant, participant_id)
-    if participant is None or participant.meeting_id != meeting.id:
-        raise Forbidden("You are not part of this meeting")
-    return participant
-
-
-def get_note(db: Session, meeting: Meeting, participant_id: int) -> schemas.NoteOut:
-    note = _find_note(db, meeting, _note_owner(db, meeting, participant_id))
-    return schemas.NoteOut(content=note.content if note else "", updated_at=note.updated_at if note else None)
-
-
-def save_note(db: Session, meeting: Meeting, data: schemas.NoteSave) -> schemas.NoteOut:
-    participant = _note_owner(db, meeting, data.participant_id)
-    note = _find_note(db, meeting, participant)
-    if note is None:
-        note = MeetingNote(
-            meeting_id=meeting.id,
-            # Signed in users keep one note per meeting; guests get one per visit.
-            user_id=participant.user_id,
-            participant_id=None if participant.user_id is not None else participant.id,
-        )
-        db.add(note)
-    note.content = data.content
-    note.updated_at = utcnow()
-    db.commit()
-    db.refresh(note)
-    return schemas.NoteOut(content=note.content, updated_at=note.updated_at)
-
-
-def get_user_note(db: Session, meeting: Meeting, user: User) -> schemas.NoteOut:
-    """The signed in user's notes for a meeting, shown on the Meetings page afterwards."""
-    note = db.scalar(
-        select(MeetingNote).where(
-            MeetingNote.meeting_id == meeting.id, MeetingNote.user_id == user.id
-        )
-    )
-    return schemas.NoteOut(content=note.content if note else "", updated_at=note.updated_at if note else None)
 
 
 # ---------- Live room state ----------
@@ -581,44 +302,3 @@ def room_state(
         if in_meeting
         else [],
     )
-
-
-# ---------- WebRTC signalling ----------
-
-SIGNAL_MAX_AGE = timedelta(minutes=2)
-
-
-def send_signal(db: Session, sender: Participant, data: schemas.SignalIn) -> None:
-    """Pass a connection note to another person in the same meeting."""
-    target = db.get(Participant, data.to)
-    if (
-        sender.status != ParticipantStatus.in_meeting
-        or target is None
-        or target.meeting_id != sender.meeting_id
-        or target.status != ParticipantStatus.in_meeting
-        or target.id == sender.id
-    ):
-        raise BadRequest("That person is not in this meeting")
-    db.add(
-        Signal(
-            meeting_id=sender.meeting_id,
-            from_participant_id=sender.id,
-            to_participant_id=target.id,
-            payload=json.dumps(data.data),
-        )
-    )
-    db.commit()
-
-
-def take_signals(db: Session, me: Participant) -> list[schemas.SignalOut]:
-    """Notes waiting for this person, oldest first. They are deleted once handed over."""
-    # Old notes nobody collected (the person left) are cleared out too.
-    db.query(Signal).filter(Signal.created_at < utcnow() - SIGNAL_MAX_AGE).delete()
-    rows = db.scalars(
-        select(Signal).where(Signal.to_participant_id == me.id).order_by(Signal.id)
-    ).all()
-    out = [schemas.SignalOut(id=r.id, from_id=r.from_participant_id, data=json.loads(r.payload)) for r in rows]
-    for r in rows:
-        db.delete(r)
-    db.commit()
-    return out

@@ -1,35 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Info, LayoutGrid, Lock, NotebookPen, ShieldCheck, User as UserIcon, Volume2, WifiOff } from "lucide-react";
 import AssignHostModal from "@/components/room/AssignHostModal";
 import ChatPanel from "@/components/room/ChatPanel";
 import ControlBar, { type Panel } from "@/components/room/ControlBar";
 import HostToolsPanel from "@/components/room/HostToolsPanel";
-import MeetingInfo from "@/components/room/MeetingInfo";
 import MeetingStage, { type ViewMode } from "@/components/room/MeetingStage";
 import NotesPanel from "@/components/room/NotesPanel";
 import ParticipantsPanel from "@/components/room/ParticipantsPanel";
 import RemoteAudio, { resumeRemoteAudio } from "@/components/room/RemoteAudio";
-import SharePicker from "@/components/share/SharePicker";
 import RenameModal from "@/components/room/RenameModal";
+import RoomBanners from "@/components/room/RoomBanners";
 import RoomEndScreen from "@/components/room/RoomEndScreen";
+import RoomTopBar from "@/components/room/RoomTopBar";
 import WaitingRoomScreen from "@/components/room/WaitingRoomScreen";
+import SharePicker from "@/components/share/SharePicker";
 import Spinner from "@/components/ui/Spinner";
-import ZoomLogo from "@/components/ui/ZoomLogo";
 import { useToast } from "@/components/ui/Toast";
 import { useCopy } from "@/hooks/useCopy";
 import { useLocalMedia } from "@/hooks/useLocalMedia";
 import { useMeetingRoom, type MeetingRoom } from "@/hooks/useMeetingRoom";
-import { useNow } from "@/hooks/useNow";
-import { usePeerMesh } from "@/hooks/usePeerMesh";
-import { useSpeaking } from "@/hooks/useSpeaking";
+import { useHostActions } from "@/hooks/room/useHostActions";
+import { useMediaSync } from "@/hooks/room/useMediaSync";
+import { useMeetingCall } from "@/hooks/room/useMeetingCall";
+import { useRoomNotices } from "@/hooks/room/useRoomNotices";
+import { useScreenShare } from "@/hooks/room/useScreenShare";
+import { useUnreadCount } from "@/hooks/room/useUnreadCount";
 import { api } from "@/lib/api";
-import { elapsed, invitationText } from "@/lib/format";
+import { invitationText } from "@/lib/format";
 import { clearMeetingSession, loadMeetingSession, type MeetingSession } from "@/lib/session";
-import { clearPendingShare, takePendingShare } from "@/lib/shareScreen";
-import type { MeetingSettings, Participant } from "@/lib/types";
+import { clearPendingShare } from "@/lib/shareScreen";
+import type { Participant } from "@/lib/types";
 
 export default function MeetingPage() {
   const { code } = useParams<{ code: string }>();
@@ -95,11 +97,11 @@ function Room({ code, session }: { code: string; session: MeetingSession }) {
   return <InMeeting code={code} session={session} room={room} />;
 }
 
+/** The meeting itself: the stage, side panels, toolbar and dialogs. The logic lives in the hooks under hooks/room. */
 function InMeeting({ code, session, room }: { code: string; session: MeetingSession; room: MeetingRoom }) {
   const router = useRouter();
   const toast = useToast();
   const copy = useCopy();
-  const now = useNow(1000);
   const pid = session.participantId;
 
   const media = useLocalMedia({ audio: !session.startMuted, video: session.startVideoOn });
@@ -111,14 +113,10 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
 
   const [panel, setPanel] = useState<Panel | null>(null);
   const [view, setView] = useState<ViewMode>("gallery");
-  const [viewMenu, setViewMenu] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [screen, setScreen] = useState<MediaStream | null>(null);
-  // Presentation option: show our video next to the shared screen.
-  const [shareWithVideo, setShareWithVideo] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [renaming, setRenaming] = useState<Participant | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? null : p));
 
   // What the host's rules block for us. The host is never blocked.
   const blocked = {
@@ -130,169 +128,40 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     rename: !isHost && !settings.allow_rename,
   };
 
-  // ---- Keep the server in step with our mic and camera ----
-  const lastLocalChange = useRef(0);
-  useEffect(() => {
-    lastLocalChange.current = Date.now();
-    patchMe({ is_muted: !media.audioOn, is_video_on: media.videoOn });
-    api.updateSelf(pid, { is_muted: !media.audioOn, is_video_on: media.videoOn }).catch(() => {});
-  }, [media.audioOn, media.videoOn, pid, patchMe]);
-
-  // If the host muted us or stopped our video, the server disagrees with our devices.
-  // Ignore this for a few seconds after our own change, in case the poll was out of date.
-  // `me` is a new object on every poll, so this re-checks every 2 seconds.
-  const { audioOn, videoOn, toggleAudio, toggleVideo, stopAll } = media;
-  useEffect(() => {
-    if (Date.now() - lastLocalChange.current < 4000) return;
-    if (me.is_muted && audioOn) {
-      toggleAudio(false);
-      toast("The host has muted you", "info");
-    }
-    if (!me.is_video_on && videoOn) {
-      toggleVideo(false);
-      toast("The host has stopped your video", "info");
-    }
-  }, [me, audioOn, videoOn, toggleAudio, toggleVideo, toast]);
-
-  // Tell people when they become host.
-  const lastRole = useRef(me.role);
-  useEffect(() => {
-    if (lastRole.current !== "host" && me.role === "host") toast("You are now the host", "success");
-    lastRole.current = me.role;
-  }, [me.role, toast]);
-
-  // Tell the host when someone enters the waiting room.
-  const knownWaiting = useRef(new Set<number>());
-  useEffect(() => {
-    for (const p of waiting) {
-      if (!knownWaiting.current.has(p.id)) toast(`${p.display_name} entered the waiting room`, "info");
-    }
-    knownWaiting.current = new Set(waiting.map((p) => p.id));
-  }, [waiting, toast]);
-
-  // Stop screen sharing if the host turns it off, or if we navigate away.
-  const screenRef = useRef<MediaStream | null>(null);
-  screenRef.current = screen;
-  const stopShare = useCallback(() => {
-    const wasSharing = !!screenRef.current;
-    screenRef.current?.getTracks().forEach((t) => t.stop());
-    setScreen(null);
-    // Tell everyone we stopped, so their view goes back to the videos.
-    setShareWithVideo(false);
-    if (wasSharing) api.updateSelf(pid, { is_sharing_screen: false, share_with_video: false }).catch(() => {});
-  }, [pid]);
-
-  const unmounted = useRef(false);
-  useEffect(() => {
-    unmounted.current = false;
-    return () => {
-      unmounted.current = true;
-    };
-  }, []);
-  const shareStartedAt = useRef(0);
-
-  /** Start sharing a screen picked in the share window (here or on the Home page). */
-  const startShare = useCallback(
-    async (s: MediaStream, withVideo: boolean) => {
-      try {
-        await api.updateSelf(pid, { is_sharing_screen: true, share_with_video: withVideo });
-      } catch (e) {
-        s.getTracks().forEach((t) => t.stop());
-        throw e; // for example the host has just turned sharing off
-      }
-      if (unmounted.current) {
-        s.getTracks().forEach((t) => t.stop()); // we left while this was starting
-        return;
-      }
-      shareStartedAt.current = Date.now();
-      screenRef.current?.getTracks().forEach((t) => t.stop()); // replacing an earlier share
-      // The browser's own "Stop sharing" button ends the track.
-      s.getVideoTracks()[0]?.addEventListener("ended", stopShare);
-      setScreen(s);
-      setShareWithVideo(withVideo);
-    },
-    [pid, stopShare],
-  );
-
-  // Shared from the Home page: the screen is already picked, start sharing it.
-  useEffect(() => {
-    const pending = takePendingShare(code);
-    if (!pending) return;
-    startShare(pending.stream, pending.withVideo).catch((e) => toast((e as Error).message, "info"));
-    // Only once, when we enter the meeting.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    if (blocked.share && screenRef.current) {
-      stopShare();
-      toast("The host has disabled screen sharing", "info");
-    }
-  }, [blocked.share, stopShare, toast]);
-  useEffect(() => () => screenRef.current?.getTracks().forEach((t) => t.stop()), []);
-
-  // One person shares at a time: if someone else started sharing, the server
-  // turned ours off. (Wait a moment after starting, in case the poll is out of date.)
-  useEffect(() => {
-    if (!screenRef.current || me.is_sharing_screen || Date.now() - shareStartedAt.current < 4000) return;
-    const other = participants.find((p) => p.is_sharing_screen && p.id !== pid);
-    screenRef.current.getTracks().forEach((t) => t.stop());
-    setScreen(null);
-    setShareWithVideo(false);
-    if (other) toast(`${other.display_name} started sharing`, "info");
-  }, [me, participants, pid, toast]);
+  useMediaSync(pid, media, me, patchMe);
+  useRoomNotices(me, waiting);
+  const share = useScreenShare({ code, pid, me, participants, blocked: blocked.share });
+  const unread = useUnreadCount(messages.length, panel === "chat");
 
   // Close the host panel if we stop being host.
   useEffect(() => {
     if (!isHost && panel === "host") setPanel(null);
   }, [isHost, panel]);
 
-  // ---- Unread chat badge ----
-  const seenMessages = useRef<number | null>(null);
-  if (seenMessages.current === null) seenMessages.current = messages.length; // history is not "unread"
-  useEffect(() => {
-    if (panel === "chat") seenMessages.current = messages.length;
-  }, [panel, messages.length]);
-  const unread = panel === "chat" ? 0 : Math.max(0, messages.length - (seenMessages.current ?? 0));
-
   // Our own tile uses the live device state so it never lags behind the server.
+  const { audioOn, videoOn, toggleAudio, toggleVideo, stopAll } = media;
   const people: Participant[] = useMemo(
     () =>
       participants.map((p) =>
         p.id === pid
-          ? { ...p, is_muted: !audioOn, is_video_on: videoOn, is_sharing_screen: !!screen, share_with_video: !!screen && shareWithVideo }
+          ? { ...p, is_muted: !audioOn, is_video_on: videoOn, is_sharing_screen: !!share.screen, share_with_video: !!share.screen && share.shareWithVideo }
           : p,
       ),
-    [participants, pid, audioOn, videoOn, screen, shareWithVideo],
+    [participants, pid, audioOn, videoOn, share.screen, share.shareWithVideo],
   );
   const others = people.filter((p) => p.id !== pid);
+  const call = useMeetingCall(pid, others, media.stream, share.screen, media.speaking);
 
-  // ---- Real audio and video with everyone else (WebRTC) ----
-  const remote = usePeerMesh(pid, others.map((p) => p.id), media.stream, screen);
-  // Someone we can't reach after a while: video calls need everyone on the same Wi-Fi network.
-  const [stuck, setStuck] = useState(false);
-  useEffect(() => {
-    const notConnected = others.some((p) => remote[p.id] && remote[p.id].state !== "connected");
-    if (!notConnected) return setStuck(false);
-    const t = setTimeout(() => setStuck(true), 25_000);
-    return () => clearTimeout(t);
-    // Re-check when anyone's connection state changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [others.map((p) => `${p.id}:${remote[p.id]?.state}`).join(",")]);
-  const remoteVoices = useMemo(
-    () => Object.fromEntries(others.filter((p) => !p.is_muted).map((p) => [p.id, remote[p.id]?.audio])),
-    [others, remote],
-  );
-  const remoteSpeaking = useSpeaking(remoteVoices);
-  const speaking = useMemo(() => {
-    const all = new Set(remoteSpeaking);
-    if (media.speaking) all.add(pid);
-    return all;
-  }, [remoteSpeaking, media.speaking, pid]);
-  // Browsers may block sound until the page is clicked.
-  const [audioBlocked, setAudioBlocked] = useState(false);
-  const onAudioBlocked = useCallback(() => setAudioBlocked(true), []);
+  // ---- Leaving ----
+  const exitMeeting = () => {
+    stopAll();
+    share.stopShare();
+    clearMeetingSession(code);
+    router.push("/");
+  };
+  const host = useHostActions(code, pid, room, exitMeeting);
 
-  // ---- Actions ----
+  // ---- Our own actions ----
   const fail = (e: unknown) => toast((e as Error).message, "error");
 
   const onToggleAudio = () => {
@@ -303,13 +172,6 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
   const onToggleVideo = () => {
     if (!videoOn && blocked.video) return toast("The host has disabled starting video", "info");
     toggleVideo();
-  };
-
-  const toggleShare = () => {
-    if (screen) return stopShare();
-    if (blocked.share) return toast("The host has disabled screen sharing", "info");
-    if (!navigator.mediaDevices?.getDisplayMedia) return toast("Screen sharing is not supported on this device", "error");
-    setPickerOpen(true);
   };
 
   const react = async (emoji: string) => {
@@ -325,13 +187,6 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     const next = !me.is_hand_raised;
     patchMe({ is_hand_raised: next });
     await api.updateSelf(pid, { is_hand_raised: next }).catch(fail);
-  };
-
-  const exitMeeting = () => {
-    stopAll();
-    stopShare();
-    clearMeetingSession(code);
-    router.push("/");
   };
 
   const leave = async () => {
@@ -351,42 +206,7 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     }
   };
 
-  const endForAll = async () => {
-    try {
-      await api.endMeeting(code, pid);
-      exitMeeting();
-      toast("Meeting ended for all participants", "success");
-    } catch (e) {
-      fail(e);
-    }
-  };
-
-  const hostAction = async (action: () => Promise<unknown>, success?: string) => {
-    try {
-      await action();
-      if (success) toast(success, "success");
-      room.refresh();
-    } catch (e) {
-      fail(e);
-    }
-  };
-
-  const muteAll = () =>
-    hostAction(async () => {
-      const { muted } = await api.muteAll(code, pid);
-      toast(muted ? `Muted ${muted} participant${muted > 1 ? "s" : ""}` : "Everyone is already muted", "success");
-    });
-
-  const removeOne = (p: Participant) => {
-    if (!window.confirm(`Remove ${p.display_name} from the meeting?`)) return;
-    hostAction(() => api.removeParticipant(p.id, pid), `${p.display_name} was removed`);
-  };
-
-  const makeHost = (p: Participant) => {
-    if (!window.confirm(`Make ${p.display_name} the host? You will lose host controls.`)) return;
-    hostAction(() => api.makeHost(p.id, pid), `${p.display_name} is now the host`);
-  };
-
+  /** Rename yourself, or (host) someone else. */
   const rename = async (name: string) => {
     if (!renaming) return;
     try {
@@ -403,24 +223,6 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     }
   };
 
-  const changeSettings = async (changes: Partial<MeetingSettings>) => {
-    try {
-      room.patchSettings(await api.updateSettings(code, pid, changes));
-    } catch (e) {
-      fail(e);
-    }
-  };
-
-  const suspend = async () => {
-    try {
-      room.patchSettings(await api.suspend(code, pid));
-      toast("Participant activities suspended. The meeting is locked.", "success");
-      room.refresh();
-    } catch (e) {
-      fail(e);
-    }
-  };
-
   const sendMessage = async (text: string) => {
     try {
       room.addLocalMessage(await api.sendMessage(code, pid, text));
@@ -430,94 +232,32 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     }
   };
 
+  const invite = () => copy(invitationText(meeting), "Invitation");
+
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-room-bg text-white">
-      {/* Top bar, like the Zoom app: logo, meeting title, and a few icons on the right */}
-      <div className="relative flex h-12 shrink-0 items-center gap-3 bg-[#1C1C1C] px-3 sm:px-4">
-        <ZoomLogo stacked className="hidden text-white sm:inline-flex" />
-        <button onClick={() => setInfoOpen((o) => !o)} className="flex min-w-0 items-center gap-2 rounded px-1.5 py-1 text-[15px] hover:bg-room-hover sm:ml-8" aria-label="Meeting information">
-          <Info className="h-4 w-4 shrink-0" />
-          <span className="truncate">{meeting.title}</span>
-        </button>
-        {meeting.started_at && now && (
-          <span className="shrink-0 text-xs tabular-nums text-[#9A9A9A]">{elapsed(meeting.started_at, now)}</span>
-        )}
-        {settings.is_locked && (
-          <span className="flex shrink-0 items-center gap-1 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#D0D0D0]">
-            <Lock className="h-3 w-3" /> Locked
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-1">
-          <button onClick={() => setInfoOpen((o) => !o)} className="rounded p-1.5 hover:bg-room-hover" aria-label="Meeting security" title="This meeting is protected by a passcode">
-            <ShieldCheck className="h-5 w-5 text-[#23D959]" />
-          </button>
-          <button
-            onClick={() => setPanel((cur) => (cur === "notes" ? null : "notes"))}
-            className={`rounded p-1.5 hover:bg-room-hover ${panel === "notes" ? "bg-room-hover" : ""}`}
-            aria-label="Notes"
-            title="Notes"
-          >
-            <NotebookPen className="h-5 w-5" />
-          </button>
-        <div className="relative">
-          <button onClick={() => setViewMenu((o) => !o)} className="rounded p-1.5 hover:bg-room-hover" aria-label="View" title="View">
-            {view === "gallery" ? <LayoutGrid className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />}
-          </button>
-          {viewMenu && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setViewMenu(false)} />
-              <div className="absolute right-0 top-9 z-40 w-40 animate-fade-up rounded-lg bg-[#2B2B2B] py-1 text-sm shadow-pop">
-                {(["speaker", "gallery"] as ViewMode[]).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => {
-                      setView(v);
-                      setViewMenu(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/10"
-                  >
-                    <span className="w-3">{view === v ? "✓" : ""}</span>
-                    {v === "speaker" ? "Speaker" : "Gallery"}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        </div>
-        {infoOpen && <MeetingInfo meeting={meeting} myName={me.display_name} onClose={() => setInfoOpen(false)} />}
-      </div>
-
-      {screen && (
-        <div className="flex shrink-0 items-center justify-center gap-3 bg-zoom-green/90 py-1 text-xs font-semibold text-white">
-          You are screen sharing
-          <button onClick={stopShare} className="rounded bg-zoom-red px-2 py-0.5 hover:bg-zoom-red-hover">Stop Share</button>
-        </div>
-      )}
-      {room.connectionLost && (
-        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500 py-1 text-xs font-semibold text-zoom-ink">
-          <WifiOff className="h-3.5 w-3.5" /> Connection lost. Reconnecting...
-        </div>
-      )}
-      {stuck && (
-        <div className="shrink-0 bg-[#2B2B2B] px-3 py-1 text-center text-xs text-[#D0D0D0]">
-          Can&apos;t reach someone&apos;s audio and video. Video calls work when everyone is on the same Wi-Fi network. Chat and reactions still work.
-        </div>
-      )}
-      {audioBlocked && (
-        <button
-          onClick={() => {
-            resumeRemoteAudio();
-            setAudioBlocked(false);
-          }}
-          className="flex shrink-0 items-center justify-center gap-2 bg-zoom-blue py-1.5 text-xs font-semibold text-white hover:bg-zoom-blue-hover"
-        >
-          <Volume2 className="h-4 w-4" /> Click to hear the other participants
-        </button>
-      )}
-      {media.error && !room.connectionLost && (
-        <div className="shrink-0 bg-[#2B2B2B] py-1 text-center text-xs text-[#D0D0D0]">{media.error}</div>
-      )}
+      <RoomTopBar
+        meeting={meeting}
+        myName={me.display_name}
+        notesOpen={panel === "notes"}
+        onToggleNotes={() => togglePanel("notes")}
+        view={view}
+        onViewChange={setView}
+        infoOpen={infoOpen}
+        onInfoOpenChange={setInfoOpen}
+      />
+      <RoomBanners
+        sharing={!!share.screen}
+        onStopShare={share.stopShare}
+        connectionLost={room.connectionLost}
+        callStuck={call.stuck}
+        audioBlocked={call.audioBlocked}
+        onResumeAudio={() => {
+          resumeRemoteAudio();
+          call.clearAudioBlocked();
+        }}
+        mediaError={media.error}
+      />
 
       {/* Video area and side panel */}
       <div className="relative flex min-h-0 flex-1">
@@ -526,11 +266,11 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
             participants={people}
             meId={pid}
             myStream={media.stream}
-            remote={remote}
-            speaking={speaking}
+            remote={call.remote}
+            speaking={call.speaking}
             reactions={room.reactions}
             view={view}
-            screen={screen}
+            screen={share.screen}
           />
         </div>
         {panel === "participants" && (
@@ -541,14 +281,14 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
             isHost={isHost}
             canRenameSelf={!blocked.rename}
             onClose={() => setPanel(null)}
-            onInvite={() => copy(invitationText(meeting), "Invitation")}
-            onMuteAll={muteAll}
-            onMute={(p) => hostAction(() => api.muteParticipant(p.id, pid))}
-            onRemove={removeOne}
+            onInvite={invite}
+            onMuteAll={host.muteAll}
+            onMute={host.mute}
+            onRemove={host.remove}
             onRename={setRenaming}
-            onMakeHost={makeHost}
-            onAdmit={(p) => hostAction(() => api.admit(p.id, pid), `${p.display_name} was admitted`)}
-            onAdmitAll={() => hostAction(() => api.admitAll(code, pid), "Everyone in the waiting room was admitted")}
+            onMakeHost={host.makeHost}
+            onAdmit={host.admit}
+            onAdmitAll={host.admitAll}
           />
         )}
         {panel === "chat" && (
@@ -556,7 +296,7 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
         )}
         {panel === "notes" && <NotesPanel code={code} participantId={pid} onClose={() => setPanel(null)} />}
         {panel === "host" && isHost && (
-          <HostToolsPanel settings={settings} onChange={changeSettings} onSuspend={suspend} onClose={() => setPanel(null)} />
+          <HostToolsPanel settings={settings} onChange={host.changeSettings} onSuspend={host.suspend} onClose={() => setPanel(null)} />
         )}
       </div>
 
@@ -567,7 +307,7 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
         participantCount={people.length}
         waitingCount={isHost ? waiting.length : 0}
         unreadChat={unread}
-        sharing={!!screen}
+        sharing={!!share.screen}
         activePanel={panel}
         handRaised={me.is_hand_raised}
         blocked={blocked}
@@ -579,37 +319,36 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
         onSelectCam={media.selectCam}
         onToggleAudio={onToggleAudio}
         onToggleVideo={onToggleVideo}
-        onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))}
-        onToggleShare={toggleShare}
+        onTogglePanel={togglePanel}
+        onToggleShare={share.toggleShare}
         onReact={react}
         onToggleHand={toggleHand}
-        onInvite={() => copy(invitationText(meeting), "Invitation")}
+        onInvite={invite}
         onShowInfo={() => setInfoOpen(true)}
         onLeave={leave}
-        onEndForAll={endForAll}
+        onEndForAll={host.endForAll}
       />
 
       {/* Everyone else's voices */}
       {others.map((p) => {
-        const { audio, screenAudio } = remote[p.id] ?? {};
+        const { audio, screenAudio } = call.remote[p.id] ?? {};
         return (
           <span key={p.id} hidden>
-            {audio && <RemoteAudio stream={audio} onBlocked={onAudioBlocked} />}
+            {audio && <RemoteAudio stream={audio} onBlocked={call.onAudioBlocked} />}
             {/* Their computer's sound, when they share with "Share sound" */}
-            {screenAudio && p.is_sharing_screen && <RemoteAudio stream={screenAudio} onBlocked={onAudioBlocked} />}
+            {screenAudio && p.is_sharing_screen && <RemoteAudio stream={screenAudio} onBlocked={call.onAudioBlocked} />}
           </span>
         );
       })}
 
       <SharePicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
+        open={share.pickerOpen}
+        onClose={() => share.setPickerOpen(false)}
         onShare={async (s, withVideo) => {
-          await startShare(s, withVideo);
-          setPickerOpen(false);
+          await share.startShare(s, withVideo);
+          share.setPickerOpen(false);
         }}
       />
-
       <RenameModal participant={renaming} isSelf={renaming?.id === pid} onClose={() => setRenaming(null)} onSave={rename} />
       <AssignHostModal open={assignOpen} candidates={others} onClose={() => setAssignOpen(false)} onAssign={assignAndLeave} />
     </div>

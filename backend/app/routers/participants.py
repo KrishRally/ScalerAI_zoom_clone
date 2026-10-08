@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.database import get_db
 from app.dependencies import participant_token
+from app.services import host_controls as host_service
 from app.services import participants as participant_service
+from app.services import signals as signal_service
 
 router = APIRouter(prefix="/api/participants", tags=["participants"])
 
@@ -35,7 +37,7 @@ def send_signal(
 ):
     """WebRTC: leave a connection note (offer or answer) for another participant."""
     sender = participant_service.authenticate(db, participant_id, token)
-    participant_service.send_signal(db, sender, data)
+    signal_service.send_signal(db, sender, data)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -47,7 +49,7 @@ def take_signals(
 ):
     """WebRTC: collect connection notes left for this participant."""
     me = participant_service.authenticate(db, participant_id, token)
-    return participant_service.take_signals(db, me)
+    return signal_service.take_signals(db, me)
 
 
 @router.post("/{participant_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
@@ -75,7 +77,7 @@ def host_mute(
     token: str | None = Depends(participant_token),
 ):
     target = _host_target(db, participant_id, data.requester_id, token)
-    return participant_service.host_mute(db, target, data.requester_id)
+    return host_service.host_mute(db, target, data.requester_id)
 
 
 @router.post("/{participant_id}/remove", status_code=status.HTTP_204_NO_CONTENT)
@@ -86,7 +88,7 @@ def remove(
     token: str | None = Depends(participant_token),
 ):
     target = _host_target(db, participant_id, data.requester_id, token)
-    participant_service.remove_participant(db, target, data.requester_id)
+    host_service.remove_participant(db, target, data.requester_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -98,7 +100,7 @@ def admit(
     token: str | None = Depends(participant_token),
 ):
     target = _host_target(db, participant_id, data.requester_id, token)
-    return participant_service.admit(db, target, data.requester_id)
+    return host_service.admit(db, target, data.requester_id)
 
 
 @router.post("/{participant_id}/rename", response_model=schemas.ParticipantOut)
@@ -109,7 +111,7 @@ def host_rename(
     token: str | None = Depends(participant_token),
 ):
     target = _host_target(db, participant_id, data.requester_id, token)
-    return participant_service.host_rename(db, target, data.requester_id, data.display_name)
+    return host_service.host_rename(db, target, data.requester_id, data.display_name)
 
 
 @router.post("/{participant_id}/make-host", response_model=schemas.ParticipantOut)
@@ -120,4 +122,4 @@ def make_host(
     token: str | None = Depends(participant_token),
 ):
     target = _host_target(db, participant_id, data.requester_id, token)
-    return participant_service.make_host(db, target, data.requester_id)
+    return host_service.make_host(db, target, data.requester_id)

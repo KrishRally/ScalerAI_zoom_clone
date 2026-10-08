@@ -8,7 +8,10 @@ from app.database import get_db
 from app.dependencies import get_current_user, get_optional_user, participant_token
 from app.models import User
 from app.seed import DEFAULT_USER_EMAIL, refresh_sample_meetings, seed_daily_meetings
+from app.services import host_controls as host_service
+from app.services import meeting_chat as meeting_chat_service
 from app.services import meetings as meeting_service
+from app.services import notes as notes_service
 from app.services import participants as participant_service
 from app.services.errors import Forbidden
 
@@ -176,7 +179,7 @@ def mute_all(
 ):
     participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    muted = participant_service.mute_all(db, meeting, data.requester_id)
+    muted = host_service.mute_all(db, meeting, data.requester_id)
     return {"muted": muted}
 
 
@@ -189,7 +192,7 @@ def end_meeting(
 ):
     participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    meeting = participant_service.end_for_all(db, meeting, data.requester_id)
+    meeting = host_service.end_for_all(db, meeting, data.requester_id)
     return meeting_service.to_meeting_out(db, meeting)
 
 
@@ -206,8 +209,8 @@ def send_message(
 ):
     participant_service.authenticate(db, data.participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    message = participant_service.send_message(db, meeting, data)
-    return participant_service.to_message_out(message)
+    message = meeting_chat_service.send_message(db, meeting, data)
+    return meeting_chat_service.to_message_out(message)
 
 
 @router.post(
@@ -223,7 +226,7 @@ def send_reaction(
 ):
     participant_service.authenticate(db, data.participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    r = participant_service.send_reaction(db, meeting, data)
+    r = meeting_chat_service.send_reaction(db, meeting, data)
     return schemas.ReactionOut(id=r.id, participant_id=r.participant_id, emoji=r.emoji)
 
 
@@ -239,7 +242,7 @@ def update_settings(
 ):
     participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.update_settings(db, meeting, data)
+    return host_service.update_settings(db, meeting, data)
 
 
 @router.post("/{code}/suspend", response_model=schemas.SettingsOut)
@@ -251,7 +254,7 @@ def suspend(
 ):
     participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.suspend_activities(db, meeting, data.requester_id)
+    return host_service.suspend_activities(db, meeting, data.requester_id)
 
 
 @router.post("/{code}/admit-all")
@@ -263,7 +266,7 @@ def admit_all(
 ):
     participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    return {"admitted": participant_service.admit_all(db, meeting, data.requester_id)}
+    return {"admitted": host_service.admit_all(db, meeting, data.requester_id)}
 
 
 # ---------- Notes ----------
@@ -278,7 +281,7 @@ def get_notes(
 ):
     participant_service.authenticate(db, participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.get_note(db, meeting, participant_id)
+    return notes_service.get_note(db, meeting, participant_id)
 
 
 @router.put("/{code}/notes", response_model=schemas.NoteOut)
@@ -290,7 +293,7 @@ def save_notes(
 ):
     participant_service.authenticate(db, data.participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.save_note(db, meeting, data)
+    return notes_service.save_note(db, meeting, data)
 
 
 @router.get("/{code}/notes/mine", response_model=schemas.NoteOut)
@@ -299,4 +302,4 @@ def my_notes(
 ):
     """The signed in user's notes, for the Meetings page."""
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.get_user_note(db, meeting, user)
+    return notes_service.get_user_note(db, meeting, user)
