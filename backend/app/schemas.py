@@ -65,6 +65,9 @@ class ScheduledMeetingCreate(BaseModel):
     duration_minutes: int = Field(default=60, ge=15, le=24 * 60)
     # Leave empty to have one generated.
     passcode: str | None = Field(default=None, max_length=10)
+    # Options shown on Zoom's schedule form.
+    waiting_room: bool = False
+    mute_on_entry: bool = False
 
     @field_validator("title")
     @classmethod
@@ -92,6 +95,8 @@ class MeetingUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     scheduled_start: UTCInput | None = None
     duration_minutes: int | None = Field(default=None, ge=15, le=24 * 60)
+    waiting_room: bool | None = None
+    mute_on_entry: bool | None = None
 
 
 class MeetingOut(ORMModel):
@@ -111,6 +116,7 @@ class MeetingOut(ORMModel):
     created_at: UTCOutput
     invite_link: str
     participant_count: int
+    settings: "SettingsOut"
 
 
 class MeetingLookup(BaseModel):
@@ -118,10 +124,12 @@ class MeetingLookup(BaseModel):
 
     meeting_code: str
     title: str
+    host_id: int
     host_name: str
     status: MeetingStatus
     scheduled_start: UTCOutput | None
     requires_passcode: bool
+    is_locked: bool
 
 
 # ---------- Participants ----------
@@ -163,12 +171,91 @@ class ParticipantUpdate(BaseModel):
     is_muted: bool | None = None
     is_video_on: bool | None = None
     is_hand_raised: bool | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Display name cannot be empty")
+        return value
 
 
 class HostAction(BaseModel):
     """Host only actions say who is asking, so the server can check they are the host."""
 
     requester_id: int
+
+
+class HostRename(HostAction):
+    display_name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Display name cannot be empty")
+        return value
+
+
+# ---------- Meeting settings ----------
+
+
+class SettingsOut(ORMModel):
+    allow_chat: bool
+    allow_unmute: bool
+    allow_video: bool
+    allow_screen_share: bool
+    allow_reactions: bool
+    allow_rename: bool
+    mute_on_entry: bool
+    waiting_room: bool
+    is_locked: bool
+
+
+class SettingsUpdate(HostAction):
+    """Only the fields sent are changed."""
+
+    allow_chat: bool | None = None
+    allow_unmute: bool | None = None
+    allow_video: bool | None = None
+    allow_screen_share: bool | None = None
+    allow_reactions: bool | None = None
+    allow_rename: bool | None = None
+    mute_on_entry: bool | None = None
+    waiting_room: bool | None = None
+    is_locked: bool | None = None
+
+
+# ---------- Notes ----------
+
+
+class NoteSave(BaseModel):
+    participant_id: int
+    content: str = Field(max_length=20000)
+
+
+class NoteOut(BaseModel):
+    content: str
+    updated_at: UTCOutput | None
+
+
+# ---------- Reactions ----------
+
+
+class ReactionCreate(BaseModel):
+    participant_id: int
+    emoji: str = Field(min_length=1, max_length=16)
+
+
+class ReactionOut(BaseModel):
+    id: int
+    participant_id: int
+    emoji: str
 
 
 # ---------- Chat ----------
@@ -204,4 +291,11 @@ class RoomState(BaseModel):
     meeting: MeetingOut
     me: ParticipantOut
     participants: list[ParticipantOut]
+    # People in the waiting room (only filled in for the host).
+    waiting: list[ParticipantOut]
     messages: list[ChatMessageOut]
+    # Reactions from the last few seconds.
+    reactions: list[ReactionOut]
+
+
+MeetingOut.model_rebuild()

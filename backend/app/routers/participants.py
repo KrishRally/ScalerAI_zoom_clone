@@ -38,3 +38,23 @@ def remove(participant_id: int, data: schemas.HostAction, db: Session = Depends(
     target = participant_service.get_participant(db, participant_id)
     participant_service.remove_participant(db, target, data.requester_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{participant_id}/admit", response_model=schemas.ParticipantOut)
+def admit(participant_id: int, data: schemas.HostAction, db: Session = Depends(get_db)):
+    target = participant_service.get_participant(db, participant_id)
+    return participant_service.admit(db, target, data.requester_id)
+
+
+@router.post("/{participant_id}/rename", response_model=schemas.ParticipantOut)
+def host_rename(
+    participant_id: int, data: schemas.HostRename, db: Session = Depends(get_db)
+):
+    target = participant_service.get_participant(db, participant_id)
+    return participant_service.host_rename(db, target, data.requester_id, data.display_name)
+
+
+@router.post("/{participant_id}/make-host", response_model=schemas.ParticipantOut)
+def make_host(participant_id: int, data: schemas.HostAction, db: Session = Depends(get_db)):
+    target = participant_service.get_participant(db, participant_id)
+    return participant_service.make_host(db, target, data.requester_id)

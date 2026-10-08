@@ -70,10 +70,12 @@ def lookup_meeting(
     return schemas.MeetingLookup(
         meeting_code=meeting.meeting_code,
         title=meeting.title,
+        host_id=meeting.host_id,
         host_name=meeting.host.name,
         status=meeting.status,
         scheduled_start=meeting.scheduled_start,
         requires_passcode=bool(meeting.passcode),
+        is_locked=meeting_service.get_settings(db, meeting).is_locked,
     )
 
 
@@ -159,3 +161,63 @@ def send_message(
     meeting = meeting_service.get_meeting(db, code)
     message = participant_service.send_message(db, meeting, data)
     return participant_service.to_message_out(message)
+
+
+@router.post(
+    "/{code}/reactions",
+    response_model=schemas.ReactionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_reaction(
+    code: str, data: schemas.ReactionCreate, db: Session = Depends(get_db)
+):
+    meeting = meeting_service.get_meeting(db, code)
+    r = participant_service.send_reaction(db, meeting, data)
+    return schemas.ReactionOut(id=r.id, participant_id=r.participant_id, emoji=r.emoji)
+
+
+# ---------- Host settings ----------
+
+
+@router.patch("/{code}/settings", response_model=schemas.SettingsOut)
+def update_settings(
+    code: str, data: schemas.SettingsUpdate, db: Session = Depends(get_db)
+):
+    meeting = meeting_service.get_meeting(db, code)
+    return participant_service.update_settings(db, meeting, data)
+
+
+@router.post("/{code}/suspend", response_model=schemas.SettingsOut)
+def suspend(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    return participant_service.suspend_activities(db, meeting, data.requester_id)
+
+
+@router.post("/{code}/admit-all")
+def admit_all(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    return {"admitted": participant_service.admit_all(db, meeting, data.requester_id)}
+
+
+# ---------- Notes ----------
+
+
+@router.get("/{code}/notes", response_model=schemas.NoteOut)
+def get_notes(code: str, participant_id: int, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    return participant_service.get_note(db, meeting, participant_id)
+
+
+@router.put("/{code}/notes", response_model=schemas.NoteOut)
+def save_notes(code: str, data: schemas.NoteSave, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    return participant_service.save_note(db, meeting, data)
+
+
+@router.get("/{code}/notes/mine", response_model=schemas.NoteOut)
+def my_notes(
+    code: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """The signed in user's notes, for the Meetings page."""
+    meeting = meeting_service.get_meeting(db, code)
+    return participant_service.get_user_note(db, meeting, user)

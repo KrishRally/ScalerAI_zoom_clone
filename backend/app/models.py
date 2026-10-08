@@ -3,6 +3,9 @@
     users ──< meetings (as host)
     meetings ──< participants >── users (optional: guests have no user)
     meetings ──< chat_messages >── participants
+    meetings ──1 meeting_settings      (host rules for the meeting)
+    meetings ──< meeting_notes         (private notes, one per person per meeting)
+    meetings ──< reactions >── participants
 
 All times are stored in UTC.
 """
@@ -47,6 +50,7 @@ class ParticipantRole(str, enum.Enum):
 
 
 class ParticipantStatus(str, enum.Enum):
+    waiting = "waiting"  # in the waiting room, not let in yet
     in_meeting = "in_meeting"
     left = "left"
     removed = "removed"  # removed by the host
@@ -94,6 +98,9 @@ class Meeting(Base):
     )
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="meeting", cascade="all, delete-orphan"
+    )
+    settings: Mapped["MeetingSettings | None"] = relationship(
+        back_populates="meeting", cascade="all, delete-orphan", uselist=False
     )
 
     __table_args__ = (
@@ -150,3 +157,78 @@ class ChatMessage(Base):
     participant: Mapped[Participant] = relationship()
 
     __table_args__ = (Index("ix_chat_meeting_id", "meeting_id", "id"),)
+
+
+class MeetingSettings(Base):
+    """Rules the host controls. One row per meeting.
+
+    Kept in its own table (not extra columns on meetings) so settings can grow
+    without touching the meetings table, and so existing databases pick it up
+    automatically on startup.
+    """
+
+    __tablename__ = "meeting_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"), unique=True
+    )
+    # What attendees are allowed to do (the host can always do everything).
+    allow_chat: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_unmute: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_video: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_screen_share: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_reactions: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_rename: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Meeting level switches.
+    mute_on_entry: Mapped[bool] = mapped_column(Boolean, default=False)
+    waiting_room: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    meeting: Mapped[Meeting] = relationship(back_populates="settings")
+
+
+class MeetingNote(Base):
+    """Private notes, like Zoom's "My Notes".
+
+    The signed in user's notes are keyed by user_id, so they are the same note
+    even if they leave and rejoin. Guests have no user, so theirs are keyed by
+    their participant row.
+    """
+
+    __tablename__ = "meeting_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    participant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("participants.id", ondelete="CASCADE"), nullable=True
+    )
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        # NULLs don't clash in a unique index, so each rule applies only to its own kind of note.
+        Index("ux_notes_meeting_user", "meeting_id", "user_id", unique=True),
+        Index("ux_notes_meeting_participant", "meeting_id", "participant_id", unique=True),
+    )
+
+
+class Reaction(Base):
+    """An emoji reaction. Short lived: the room only shows the last few seconds."""
+
+    __tablename__ = "reactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"))
+    participant_id: Mapped[int] = mapped_column(
+        ForeignKey("participants.id", ondelete="CASCADE")
+    )
+    emoji: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_reactions_meeting_created", "meeting_id", "created_at"),)

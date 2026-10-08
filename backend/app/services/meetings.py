@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.models import (
     Meeting,
+    MeetingSettings,
     MeetingStatus,
     MeetingType,
     Participant,
@@ -22,6 +23,18 @@ from app.services.codes import (
     normalize_meeting_code,
 )
 from app.services.errors import BadRequest, Forbidden, NotFound
+
+
+def get_settings(db: Session, meeting: Meeting) -> MeetingSettings:
+    """The meeting's settings row, created with defaults the first time it's needed.
+
+    Creating it lazily means meetings made before settings existed still work.
+    """
+    if meeting.settings is None:
+        meeting.settings = MeetingSettings()
+        db.commit()
+        db.refresh(meeting)
+    return meeting.settings
 
 
 def to_meeting_out(db: Session, meeting: Meeting) -> schemas.MeetingOut:
@@ -48,6 +61,7 @@ def to_meeting_out(db: Session, meeting: Meeting) -> schemas.MeetingOut:
         created_at=meeting.created_at,
         invite_link=build_invite_link(meeting.meeting_code, meeting.passcode),
         participant_count=active or 0,
+        settings=schemas.SettingsOut.model_validate(get_settings(db, meeting)),
     )
 
 
@@ -73,6 +87,7 @@ def create_instant_meeting(
         status=MeetingStatus.scheduled,  # becomes "live" when the host joins
         passcode=generate_passcode(),
         duration_minutes=60,
+        settings=MeetingSettings(),
     )
     db.add(meeting)
     db.commit()
@@ -96,6 +111,9 @@ def create_scheduled_meeting(
         passcode=data.passcode or generate_passcode(),
         scheduled_start=data.scheduled_start,
         duration_minutes=data.duration_minutes,
+        settings=MeetingSettings(
+            waiting_room=data.waiting_room, mute_on_entry=data.mute_on_entry
+        ),
     )
     db.add(meeting)
     db.commit()
@@ -149,9 +167,12 @@ def update_meeting(
     if meeting.status == MeetingStatus.ended:
         raise BadRequest("This meeting has already ended")
     changes = data.model_dump(exclude_unset=True)
+    settings_fields = {"waiting_room", "mute_on_entry"}
+    settings = get_settings(db, meeting)
     for field, value in changes.items():
-        if value is not None:
-            setattr(meeting, field, value)
+        if value is None:
+            continue
+        setattr(settings if field in settings_fields else meeting, field, value)
     db.commit()
     db.refresh(meeting)
     return meeting
