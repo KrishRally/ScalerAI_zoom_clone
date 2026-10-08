@@ -1,0 +1,158 @@
+"""Meeting endpoints. Each one is a thin wrapper around the service layer."""
+
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy.orm import Session
+
+from app import schemas
+from app.database import get_db
+from app.dependencies import get_current_user
+from app.models import User
+from app.services import meetings as meeting_service
+from app.services import participants as participant_service
+from app.services.errors import Forbidden
+
+router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+
+
+@router.get("/upcoming", response_model=list[schemas.MeetingOut])
+def upcoming_meetings(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return [
+        meeting_service.to_meeting_out(db, m)
+        for m in meeting_service.list_upcoming(db, user)
+    ]
+
+
+@router.get("/recent", response_model=list[schemas.MeetingOut])
+def recent_meetings(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return [
+        meeting_service.to_meeting_out(db, m) for m in meeting_service.list_recent(db, user)
+    ]
+
+
+@router.post(
+    "/instant", response_model=schemas.MeetingOut, status_code=status.HTTP_201_CREATED
+)
+def create_instant(
+    data: schemas.InstantMeetingCreate | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    meeting = meeting_service.create_instant_meeting(
+        db, user, data or schemas.InstantMeetingCreate()
+    )
+    return meeting_service.to_meeting_out(db, meeting)
+
+
+@router.post(
+    "/scheduled", response_model=schemas.MeetingOut, status_code=status.HTTP_201_CREATED
+)
+def create_scheduled(
+    data: schemas.ScheduledMeetingCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    meeting = meeting_service.create_scheduled_meeting(db, user, data)
+    return meeting_service.to_meeting_out(db, meeting)
+
+
+@router.get("/lookup", response_model=schemas.MeetingLookup)
+def lookup_meeting(
+    q: str = Query(..., description="Meeting ID or invite link"),
+    db: Session = Depends(get_db),
+):
+    """Check that a meeting exists before showing the join screen."""
+    meeting = meeting_service.get_meeting(db, q)
+    return schemas.MeetingLookup(
+        meeting_code=meeting.meeting_code,
+        title=meeting.title,
+        host_name=meeting.host.name,
+        status=meeting.status,
+        scheduled_start=meeting.scheduled_start,
+        requires_passcode=bool(meeting.passcode),
+    )
+
+
+@router.get("/{code}", response_model=schemas.MeetingOut)
+def get_meeting(
+    code: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Full details, including the passcode. Only the host may see these."""
+    meeting = meeting_service.get_meeting(db, code)
+    if meeting.host_id != user.id:
+        raise Forbidden("Only the host can view full meeting details")
+    return meeting_service.to_meeting_out(db, meeting)
+
+
+@router.patch("/{code}", response_model=schemas.MeetingOut)
+def update_meeting(
+    code: str,
+    data: schemas.MeetingUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    meeting = meeting_service.get_meeting(db, code)
+    meeting = meeting_service.update_meeting(db, user, meeting, data)
+    return meeting_service.to_meeting_out(db, meeting)
+
+
+@router.delete("/{code}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_meeting(
+    code: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    meeting = meeting_service.get_meeting(db, code)
+    meeting_service.delete_meeting(db, user, meeting)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------- Inside a meeting ----------
+
+
+@router.post(
+    "/{code}/join",
+    response_model=schemas.ParticipantOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def join_meeting(code: str, data: schemas.JoinRequest, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    return participant_service.join_meeting(db, meeting, data)
+
+
+@router.get("/{code}/state", response_model=schemas.RoomState)
+def room_state(
+    code: str,
+    participant_id: int,
+    after_message_id: int = 0,
+    db: Session = Depends(get_db),
+):
+    meeting = meeting_service.get_meeting(db, code)
+    participant = participant_service.get_participant(db, participant_id)
+    return participant_service.room_state(db, meeting, participant, after_message_id)
+
+
+@router.post("/{code}/mute-all")
+def mute_all(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    muted = participant_service.mute_all(db, meeting, data.requester_id)
+    return {"muted": muted}
+
+
+@router.post("/{code}/end", response_model=schemas.MeetingOut)
+def end_meeting(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+    meeting = meeting_service.get_meeting(db, code)
+    meeting = participant_service.end_for_all(db, meeting, data.requester_id)
+    return meeting_service.to_meeting_out(db, meeting)
+
+
+@router.post(
+    "/{code}/messages",
+    response_model=schemas.ChatMessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_message(
+    code: str, data: schemas.ChatMessageCreate, db: Session = Depends(get_db)
+):
+    meeting = meeting_service.get_meeting(db, code)
+    message = participant_service.send_message(db, meeting, data)
+    return participant_service.to_message_out(message)

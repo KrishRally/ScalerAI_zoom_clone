@@ -1,0 +1,50 @@
+"""App entry point: creates tables, seeds data, wires up routes and CORS."""
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.config import CORS_ORIGIN_REGEX, CORS_ORIGINS
+from app.database import Base, SessionLocal, engine
+from app.routers import meetings, participants, users
+from app.seed import seed_database
+from app.services.errors import ServiceError
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Small app, so we create tables directly instead of using migrations.
+    Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        seed_database(db)
+    yield
+
+
+app = FastAPI(title="Zoom Clone API", version="1.0.0", lifespan=lifespan)
+
+# CORS lets the frontend (on a different domain) call this API from the browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.exception_handler(ServiceError)
+async def handle_service_error(_request: Request, exc: ServiceError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
+app.include_router(users.router)
+app.include_router(meetings.router)
+app.include_router(participants.router)
+
+
+@app.get("/api/health", tags=["health"])
+def health():
+    return {"status": "ok"}
