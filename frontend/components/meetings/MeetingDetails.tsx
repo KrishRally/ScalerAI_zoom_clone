@@ -1,7 +1,9 @@
 "use client";
 
-import { Copy, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Copy, NotebookPen, Pencil, Trash2 } from "lucide-react";
 import { useCopy } from "@/hooks/useCopy";
+import { api } from "@/lib/api";
 import { formatDuration, formatMeetingCode, invitationText } from "@/lib/format";
 import type { Meeting } from "@/lib/types";
 
@@ -17,6 +19,17 @@ interface Props {
 export default function MeetingDetails({ meeting, onStart, onEdit, onDelete, starting }: Props) {
   const copy = useCopy();
   const when = meeting.scheduled_start ?? meeting.started_at;
+  const [notes, setNotes] = useState<string | null>(null);
+
+  // Notes only exist once a meeting has started.
+  useEffect(() => {
+    setNotes(null);
+    if (!meeting.started_at) return;
+    api
+      .myNote(meeting.meeting_code)
+      .then((n) => setNotes(n.content))
+      .catch(() => setNotes(null));
+  }, [meeting.meeting_code, meeting.started_at]);
   const isPast = meeting.status === "ended";
 
   return (
@@ -80,7 +93,27 @@ export default function MeetingDetails({ meeting, onStart, onEdit, onDelete, sta
         )}
         {meeting.started_at && <Row label="Started">{shortDateTime(meeting.started_at)}</Row>}
         {meeting.ended_at && <Row label="Ended">{shortDateTime(meeting.ended_at)}</Row>}
+        {!isPast && (meeting.settings.waiting_room || meeting.settings.mute_on_entry) && (
+          <Row label="Options">
+            {[meeting.settings.waiting_room && "Waiting room on", meeting.settings.mute_on_entry && "Mute upon entry"]
+              .filter(Boolean)
+              .join(" · ")}
+          </Row>
+        )}
       </dl>
+
+      {meeting.started_at && (
+        <section className="mt-6 border-t border-zoom-border pt-6">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-zoom-ink">
+            <NotebookPen className="h-4 w-4" /> My notes
+          </h3>
+          {notes ? (
+            <p className="mt-2 whitespace-pre-wrap rounded-lg bg-zoom-surface p-3 text-sm">{notes}</p>
+          ) : (
+            <p className="mt-2 text-sm text-zoom-muted">No notes for this meeting. Open Notes during a meeting to take some.</p>
+          )}
+        </section>
+      )}
     </div>
   );
 }

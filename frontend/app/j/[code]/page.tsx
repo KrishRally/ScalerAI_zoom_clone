@@ -3,30 +3,45 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Mic, MicOff, Video, VideoOff } from "lucide-react";
+import { Lock, Mic, MicOff, Video, VideoOff } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Spinner from "@/components/ui/Spinner";
 import ZoomLogo from "@/components/ui/ZoomLogo";
+import DeviceSelect from "@/components/room/DeviceSelect";
 import VideoPreview from "@/components/room/VideoPreview";
+import { useCurrentUser } from "@/components/providers/UserProvider";
 import { useLocalMedia } from "@/hooks/useLocalMedia";
 import { api } from "@/lib/api";
 import { formatMeetingCode } from "@/lib/format";
-import { loadDisplayName, saveDisplayName, saveMeetingSession } from "@/lib/session";
+import {
+  loadDisplayName,
+  loadShowPreview,
+  saveDisplayName,
+  saveMeetingSession,
+  saveShowPreview,
+} from "@/lib/session";
 import type { MeetingLookup } from "@/lib/types";
 
 /**
- * Where invite links land (/j/<meeting id>?pwd=...).
- * Checks the meeting exists, shows a camera preview, and asks for a name before joining.
+ * The preview window shown before every meeting, like Zoom's.
+ *
+ * - Guests land here from invite links (/j/<id>?pwd=...) or the Join dialog.
+ * - The host lands here with ?start=1 when starting a meeting from the dashboard.
+ *
+ * It checks the meeting exists, shows your camera, lets you pick your mic and
+ * camera, and asks for a name (and passcode for guests) before joining.
  */
 function PreJoin() {
   const { code } = useParams<{ code: string }>();
   const params = useSearchParams();
   const router = useRouter();
+  const { user } = useCurrentUser();
 
   const [meeting, setMeeting] = useState<MeetingLookup | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [passcode, setPasscode] = useState(params.get("pwd") ?? "");
+  const [showPreview, setShowPreview] = useState(true);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
 
@@ -35,13 +50,21 @@ function PreJoin() {
     video: params.get("video") !== "off",
   });
 
+  // Starting as host only applies to the meeting's owner (the signed in user).
+  const isHostStart = params.get("start") === "1" && !!user && meeting?.host_id === user.id;
+
   useEffect(() => {
-    setName(params.get("name") || loadDisplayName());
+    setShowPreview(loadShowPreview());
     api
       .lookupMeeting(code)
       .then(setMeeting)
       .catch((e: Error) => setLookupError(e.message));
-  }, [code, params]);
+  }, [code]);
+
+  useEffect(() => {
+    if (isHostStart && user) setName(user.name);
+    else setName(params.get("name") || loadDisplayName());
+  }, [isHostStart, user, params]);
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
@@ -51,17 +74,19 @@ function PreJoin() {
     try {
       const me = await api.joinMeeting(code, {
         display_name: name.trim(),
-        passcode: passcode.trim(),
+        passcode: isHostStart ? undefined : passcode.trim(),
+        user_id: isHostStart ? user!.id : undefined,
         is_muted: !media.audioOn,
         is_video_on: media.videoOn,
       });
-      saveDisplayName(name.trim());
+      if (!isHostStart) saveDisplayName(name.trim());
+      saveShowPreview(showPreview);
       saveMeetingSession(code, {
         participantId: me.id,
-        startMuted: !media.audioOn,
-        startVideoOn: media.videoOn,
+        startMuted: me.is_muted,
+        startVideoOn: me.is_video_on,
       });
-      media.stopAll(); // the room opens the camera again
+      media.stopAll(); // the room opens the camera again with the same devices
       router.push(`/meeting/${code}`);
     } catch (err) {
       setJoinError((err as Error).message);
@@ -93,71 +118,99 @@ function PreJoin() {
     );
   }
 
-  const ended = meeting.status === "ended";
+  const ended = meeting.status === "ended" && !isHostStart;
+  const locked = meeting.is_locked && !isHostStart;
+  const hasVideo = media.videoOn && !!media.stream?.getVideoTracks().length;
 
   return (
     <Shell>
-      <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-[1.4fr_1fr] md:items-center md:gap-10">
-        {/* Camera preview */}
-        <div>
-          <div className="relative aspect-video overflow-hidden rounded-xl bg-room-tile">
-            {media.videoOn && media.stream?.getVideoTracks().length ? (
-              <VideoPreview stream={media.stream} />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <Avatar name={name || "Guest"} size={88} />
-              </div>
-            )}
-            <span className="absolute bottom-3 left-3 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
-              {name || "Your name"}
-            </span>
-          </div>
-          <div className="mt-4 flex justify-center gap-3">
-            <PreviewToggle on={media.audioOn} onClick={() => media.toggleAudio()} onIcon={Mic} offIcon={MicOff} label={media.audioOn ? "Mute" : "Unmute"} />
-            <PreviewToggle on={media.videoOn} onClick={() => media.toggleVideo()} onIcon={Video} offIcon={VideoOff} label={media.videoOn ? "Stop Video" : "Start Video"} />
-          </div>
-          {media.error && <p className="mt-2 text-center text-xs text-zoom-muted">{media.error}</p>}
+      <form
+        onSubmit={handleJoin}
+        className="mx-auto max-w-3xl overflow-hidden rounded-xl border border-zoom-border bg-white shadow-pop"
+      >
+        {/* Title bar, like Zoom's preview window */}
+        <div className="flex items-center justify-between gap-3 border-b border-zoom-border px-4 py-2.5">
+          <p className="truncate text-sm font-semibold text-zoom-ink">{meeting.title}</p>
+          <p className="shrink-0 text-xs text-zoom-muted">ID {formatMeetingCode(meeting.meeting_code)}</p>
         </div>
 
-        {/* Details and name */}
-        <form onSubmit={handleJoin} className="rounded-xl border border-zoom-border bg-white p-6 shadow-card">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zoom-muted">
-            {meeting.status === "live" ? "Meeting in progress" : "Meeting"}
-          </p>
-          <h1 className="mt-1 text-xl font-bold text-zoom-ink">{meeting.title}</h1>
-          <p className="mt-1 text-sm text-zoom-muted">
-            Hosted by {meeting.host_name} · ID {formatMeetingCode(meeting.meeting_code)}
-          </p>
+        <div className="space-y-4 p-4 sm:p-5">
+          {/* Camera preview with the Audio and Video buttons on top */}
+          <div className="relative aspect-video overflow-hidden rounded-lg bg-room-tile">
+            {hasVideo ? (
+              <VideoPreview stream={media.stream} />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3">
+                <Avatar name={name || "Guest"} size={88} />
+                {!media.videoOn && <p className="text-sm text-[#B3B3B3]">Your video is off</p>}
+              </div>
+            )}
+            <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 overflow-hidden rounded-lg bg-black/70 text-white">
+              <OverlayButton on={media.audioOn} onClick={() => media.toggleAudio()} onIcon={Mic} offIcon={MicOff} label="Audio" />
+              <OverlayButton on={media.videoOn} onClick={() => media.toggleVideo()} onIcon={Video} offIcon={VideoOff} label="Video" />
+            </div>
+          </div>
+
+          {/* Device pickers */}
+          <div className="flex flex-col gap-2 rounded-lg bg-zoom-surface p-2 sm:flex-row">
+            <DeviceSelect kind="mic" devices={media.mics} value={media.micId} onChange={media.selectMic} />
+            <DeviceSelect kind="cam" devices={media.cams} value={media.camId} onChange={media.selectCam} />
+          </div>
+          {media.error && <p className="text-xs text-zoom-muted">{media.error}</p>}
 
           {ended ? (
-            <p className="mt-6 rounded-lg bg-zoom-surface p-4 text-sm text-zoom-text">This meeting has ended.</p>
+            <p className="rounded-lg bg-zoom-surface p-4 text-sm">This meeting has ended.</p>
           ) : (
-            <div className="mt-6 space-y-4">
-              <div>
-                <label className="label" htmlFor="name">Your name</label>
-                <input id="name" className="input" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} autoFocus />
-              </div>
-              {meeting.requires_passcode && (
-                <div>
-                  <label className="label" htmlFor="passcode">Meeting passcode</label>
-                  <input
-                    id="passcode"
-                    type="password"
-                    className="input"
-                    value={passcode}
-                    onChange={(e) => setPasscode(e.target.value)}
-                    placeholder="Enter meeting passcode"
-                  />
+            <>
+              {!isHostStart && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label" htmlFor="name">Your name</label>
+                    <input id="name" className="input" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+                  </div>
+                  {meeting.requires_passcode && (
+                    <div>
+                      <label className="label" htmlFor="passcode">Meeting passcode</label>
+                      <input
+                        id="passcode"
+                        type="password"
+                        className="input"
+                        value={passcode}
+                        onChange={(e) => setPasscode(e.target.value)}
+                        placeholder="Enter meeting passcode"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
+              {locked && (
+                <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <Lock className="h-4 w-4" /> This meeting has been locked by the host.
+                </p>
+              )}
               {joinError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-zoom-red">{joinError}</p>}
-              <button type="submit" className="btn-primary w-full py-2.5" disabled={joining || !name.trim()}>
-                {joining ? <Spinner className="h-4 w-4" /> : "Join"}
-              </button>
-            </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-zoom-blue"
+                    checked={showPreview}
+                    onChange={(e) => setShowPreview(e.target.checked)}
+                  />
+                  Always show this preview when joining
+                </label>
+                <button type="submit" className="btn-primary min-w-32 py-2.5" disabled={joining || !name.trim() || locked}>
+                  {joining ? <Spinner className="h-4 w-4" /> : isHostStart ? "Start" : "Join"}
+                </button>
+              </div>
+              {!isHostStart && (
+                <p className="text-xs text-zoom-muted">Hosted by {meeting.host_name}</p>
+              )}
+            </>
           )}
-        </form>
-      </div>
+        </div>
+      </form>
     </Shell>
   );
 }
@@ -168,12 +221,12 @@ function Shell({ children }: { children: React.ReactNode }) {
       <header className="flex h-14 items-center border-b border-zoom-border bg-white px-4 sm:px-6">
         <Link href="/"><ZoomLogo /></Link>
       </header>
-      <main className="px-4 py-8 sm:px-6 sm:py-12">{children}</main>
+      <main className="px-4 py-6 sm:px-6 sm:py-10">{children}</main>
     </div>
   );
 }
 
-function PreviewToggle({
+function OverlayButton({
   on,
   onClick,
   onIcon: OnIcon,
@@ -190,11 +243,10 @@ function PreviewToggle({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-        on ? "bg-white text-zoom-ink shadow-card hover:bg-zoom-border/50" : "bg-zoom-red text-white hover:bg-zoom-red-hover"
-      }`}
+      aria-label={`${on ? "Turn off" : "Turn on"} ${label.toLowerCase()}`}
+      className="flex w-20 flex-col items-center gap-1 px-3 py-2 text-xs hover:bg-white/10"
     >
-      {on ? <OnIcon className="h-4 w-4" /> : <OffIcon className="h-4 w-4" />}
+      {on ? <OnIcon className="h-5 w-5" /> : <OffIcon className="h-5 w-5 text-zoom-red" />}
       {label}
     </button>
   );

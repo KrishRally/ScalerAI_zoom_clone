@@ -1,11 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadDevice, saveDevice } from "@/lib/session";
 
 interface Options {
   audio: boolean;
   video: boolean;
 }
+
+export interface DeviceOption {
+  deviceId: string;
+  label: string;
+}
+
+/** Ask for a specific device if one was picked, otherwise any. */
+const pick = (deviceId?: string): MediaTrackConstraints | boolean =>
+  deviceId ? { deviceId: { exact: deviceId } } : true;
 
 /**
  * Your own camera and microphone.
@@ -13,6 +23,7 @@ interface Options {
  * - Muting just disables the audio track (instant, no new permission prompt).
  * - Turning video off fully stops the camera so its light goes off, like Zoom.
  *   Turning it back on asks the browser for a fresh video track.
+ * - The mic and camera can be switched; the choice is remembered for next time.
  * - `speaking` is true while your mic picks up sound, used for the green border.
  */
 export function useLocalMedia(initial: Options) {
@@ -21,11 +32,38 @@ export function useLocalMedia(initial: Options) {
   const [videoOn, setVideoOn] = useState(initial.video);
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [mics, setMics] = useState<DeviceOption[]>([]);
+  const [cams, setCams] = useState<DeviceOption[]>([]);
+  const [micId, setMicId] = useState<string | undefined>(() => loadDevice("mic"));
+  const [camId, setCamId] = useState<string | undefined>(() => loadDevice("cam"));
   const streamRef = useRef<MediaStream | null>(null);
+  const audioOnRef = useRef(initial.audio);
+  const camIdRef = useRef(camId);
+  camIdRef.current = camId;
 
   const updateStream = (next: MediaStream | null) => {
     streamRef.current = next;
     setStream(next);
+  };
+
+  // Device names are only available after the user allows camera or mic access.
+  const refreshDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const toOption = (d: MediaDeviceInfo, i: number, fallback: string) => ({
+      deviceId: d.deviceId,
+      label: d.label || `${fallback} ${i + 1}`,
+    });
+    setMics(all.filter((d) => d.kind === "audioinput" && d.deviceId).map((d, i) => toOption(d, i, "Microphone")));
+    setCams(all.filter((d) => d.kind === "videoinput" && d.deviceId).map((d, i) => toOption(d, i, "Camera")));
+  }, []);
+
+  // Remember which device each track actually came from.
+  const syncIds = (s: MediaStream) => {
+    const mic = s.getAudioTracks()[0]?.getSettings().deviceId;
+    const cam = s.getVideoTracks()[0]?.getSettings().deviceId;
+    if (mic) setMicId(mic);
+    if (cam) setCamId(cam);
   };
 
   // Ask for camera and mic once. If one is blocked, try to get at least the other.
@@ -38,7 +76,11 @@ export function useLocalMedia(initial: Options) {
     }
 
     async function acquire() {
+      const savedMic = loadDevice("mic");
+      const savedCam = loadDevice("cam");
       const tries: MediaStreamConstraints[] = [
+        { audio: pick(savedMic), video: initial.video && pick(savedCam) },
+        // The saved device may be unplugged, so fall back to any device.
         { audio: true, video: initial.video },
         { audio: true, video: false },
         { audio: false, video: initial.video },
@@ -53,6 +95,8 @@ export function useLocalMedia(initial: Options) {
           }
           s.getAudioTracks().forEach((t) => (t.enabled = initial.audio));
           updateStream(s);
+          syncIds(s);
+          refreshDevices();
           if (!s.getVideoTracks().length) setVideoOn(false);
           if (!s.getAudioTracks().length) setError("Microphone not available");
           return;
@@ -68,18 +112,21 @@ export function useLocalMedia(initial: Options) {
     }
     acquire();
 
+    navigator.mediaDevices?.addEventListener?.("devicechange", refreshDevices);
     return () => {
       cancelled = true;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", refreshDevices);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-    // Only on first mount; later changes go through the toggle functions.
+    // Only on first mount; later changes go through the functions below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleAudio = useCallback((on?: boolean) => {
     setAudioOn((prev) => {
       const next = on ?? !prev;
+      audioOnRef.current = next;
       streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = next));
       return next;
     });
@@ -99,16 +146,55 @@ export function useLocalMedia(initial: Options) {
       setVideoOn(false);
       return true;
     }
+    if (hasVideo) {
+      setVideoOn(true);
+      return true;
+    }
 
     try {
-      const cam = await navigator.mediaDevices.getUserMedia({ video: true });
+      const cam = await navigator.mediaDevices
+        .getUserMedia({ video: pick(camIdRef.current) })
+        .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
       const merged = new MediaStream([...(current?.getAudioTracks() ?? []), ...cam.getVideoTracks()]);
       updateStream(merged);
+      syncIds(merged);
       setVideoOn(true);
+      refreshDevices();
       return true;
     } catch {
       setError("Could not start your camera. Check the browser permission.");
       return false;
+    }
+  }, [refreshDevices]);
+
+  /** Switch to another microphone, keeping the mute state. */
+  const selectMic = useCallback(async (deviceId: string) => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: pick(deviceId) });
+      const track = s.getAudioTracks()[0];
+      track.enabled = audioOnRef.current;
+      const current = streamRef.current;
+      current?.getAudioTracks().forEach((t) => t.stop());
+      updateStream(new MediaStream([track, ...(current?.getVideoTracks() ?? [])]));
+      setMicId(deviceId);
+      saveDevice("mic", deviceId);
+    } catch {
+      setError("Could not switch to that microphone.");
+    }
+  }, []);
+
+  /** Switch to another camera. If video is off, the choice is used next time it starts. */
+  const selectCam = useCallback(async (deviceId: string) => {
+    setCamId(deviceId);
+    saveDevice("cam", deviceId);
+    const current = streamRef.current;
+    if (!current?.getVideoTracks().length) return;
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: pick(deviceId) });
+      current.getVideoTracks().forEach((t) => t.stop());
+      updateStream(new MediaStream([...current.getAudioTracks(), ...s.getVideoTracks()]));
+    } catch {
+      setError("Could not switch to that camera.");
     }
   }, []);
 
@@ -150,5 +236,22 @@ export function useLocalMedia(initial: Options) {
     updateStream(null);
   }, []);
 
-  return { stream, audioOn, videoOn, error, speaking, toggleAudio, toggleVideo, stopAll };
+  return {
+    stream,
+    audioOn,
+    videoOn,
+    error,
+    speaking,
+    mics,
+    cams,
+    micId,
+    camId,
+    toggleAudio,
+    toggleVideo,
+    selectMic,
+    selectCam,
+    stopAll,
+  };
 }
+
+export type LocalMedia = ReturnType<typeof useLocalMedia>;

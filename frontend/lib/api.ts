@@ -5,7 +5,10 @@ import type {
   JoinInput,
   Meeting,
   MeetingLookup,
+  MeetingSettings,
+  Note,
   Participant,
+  Reaction,
   RoomState,
   ScheduleInput,
   User,
@@ -84,9 +87,22 @@ export const api = {
       content,
     }),
 
+  sendReaction: (c: string, participantId: number, emoji: string) =>
+    post<Reaction>(`/api/meetings/${code(c)}/reactions`, { participant_id: participantId, emoji }),
+
+  // Notes: private to whoever writes them.
+  getNote: (c: string, participantId: number) =>
+    request<Note>(`/api/meetings/${code(c)}/notes?participant_id=${participantId}`),
+  saveNote: (c: string, participantId: number, content: string) =>
+    request<Note>(`/api/meetings/${code(c)}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ participant_id: participantId, content }),
+    }),
+  myNote: (c: string) => request<Note>(`/api/meetings/${code(c)}/notes/mine`),
+
   updateSelf: (
     participantId: number,
-    changes: Partial<Pick<Participant, "is_muted" | "is_video_on" | "is_hand_raised">>,
+    changes: Partial<Pick<Participant, "is_muted" | "is_video_on" | "is_hand_raised" | "display_name">>,
   ) =>
     request<Participant>(`/api/participants/${participantId}`, {
       method: "PATCH",
@@ -103,4 +119,22 @@ export const api = {
     post<void>(`/api/participants/${participantId}/remove`, { requester_id: requesterId }),
   endMeeting: (c: string, requesterId: number) =>
     post<Meeting>(`/api/meetings/${code(c)}/end`, { requester_id: requesterId }),
+  updateSettings: (c: string, requesterId: number, changes: Partial<MeetingSettings>) =>
+    request<MeetingSettings>(`/api/meetings/${code(c)}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify({ requester_id: requesterId, ...changes }),
+    }),
+  suspend: (c: string, requesterId: number) =>
+    post<MeetingSettings>(`/api/meetings/${code(c)}/suspend`, { requester_id: requesterId }),
+  admit: (participantId: number, requesterId: number) =>
+    post<Participant>(`/api/participants/${participantId}/admit`, { requester_id: requesterId }),
+  admitAll: (c: string, requesterId: number) =>
+    post<{ admitted: number }>(`/api/meetings/${code(c)}/admit-all`, { requester_id: requesterId }),
+  renameParticipant: (participantId: number, requesterId: number, displayName: string) =>
+    post<Participant>(`/api/participants/${participantId}/rename`, {
+      requester_id: requesterId,
+      display_name: displayName,
+    }),
+  makeHost: (participantId: number, requesterId: number) =>
+    post<Participant>(`/api/participants/${participantId}/make-host`, { requester_id: requesterId }),
 };

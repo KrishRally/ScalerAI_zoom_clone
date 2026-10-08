@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SendHorizontal } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
-import { PanelShell } from "./ParticipantsPanel";
+import PanelShell from "./PanelShell";
 import { formatTime } from "@/lib/format";
 import type { ChatMessage } from "@/lib/types";
 
@@ -12,10 +12,12 @@ interface Props {
   meId: number;
   onSend: (text: string) => Promise<void>;
   onClose: () => void;
+  /** True when the host has turned chat off for attendees. */
+  disabled?: boolean;
 }
 
 /** In-meeting chat, sent to everyone. */
-export default function ChatPanel({ messages, meId, onSend, onClose }: Props) {
+export default function ChatPanel({ messages, meId, onSend, onClose, disabled }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -67,36 +69,42 @@ export default function ChatPanel({ messages, meId, onSend, onClose }: Props) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-zoom-border p-3">
-        <p className="mb-1.5 text-xs text-zoom-muted">
-          To: <span className="rounded bg-zoom-blue-light px-1.5 py-0.5 font-semibold text-zoom-blue">Everyone</span>
+      {disabled ? (
+        <p className="border-t border-zoom-border p-4 text-center text-sm text-zoom-muted">
+          The host has disabled chat for participants.
         </p>
-        <div className="flex items-end gap-2">
-          <textarea
-            rows={2}
-            className="input resize-none"
-            placeholder="Type message here..."
-            value={text}
-            maxLength={2000}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter sends, Shift+Enter adds a new line.
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          <button
-            onClick={submit}
-            disabled={!text.trim() || sending}
-            className="rounded-lg p-2 text-zoom-blue hover:bg-zoom-blue-light disabled:text-zoom-muted disabled:hover:bg-transparent"
-            aria-label="Send"
-          >
-            <SendHorizontal className="h-5 w-5" />
-          </button>
+      ) : (
+        <div className="border-t border-zoom-border p-3">
+          <p className="mb-1.5 text-xs text-zoom-muted">
+            To: <span className="rounded bg-zoom-blue-light px-1.5 py-0.5 font-semibold text-zoom-blue">Everyone</span>
+          </p>
+          <div className="flex items-end gap-2">
+            <textarea
+              rows={2}
+              className="input resize-none"
+              placeholder="Type message here..."
+              value={text}
+              maxLength={2000}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter sends, Shift+Enter adds a new line.
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            <button
+              onClick={submit}
+              disabled={!text.trim() || sending}
+              className="rounded-lg p-2 text-zoom-blue hover:bg-zoom-blue-light disabled:text-zoom-muted disabled:hover:bg-transparent"
+              aria-label="Send"
+            >
+              <SendHorizontal className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </PanelShell>
   );
 }

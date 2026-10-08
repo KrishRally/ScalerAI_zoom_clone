@@ -2,8 +2,8 @@
 
 A Zoom Workplace style web app where you can start instant meetings, join with a Meeting ID or invite link, schedule meetings, and run a meeting room with participants, chat and host controls.
 
-- **Live app:** _add your Vercel link here_
-- **API docs (Swagger):** _add your Railway link here_ + `/docs`
+- **Live app:** https://scaleraizoomclone-frontend.vercel.app
+- **API docs (Swagger):** https://scaleraizoomclone-production.up.railway.app/docs
 
 ## Tech stack
 
@@ -21,21 +21,30 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 **Core**
 - **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, Apps, search, settings, profile menu), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
 - **Instant meeting:** one click creates a meeting with a unique 10 digit Meeting ID, a passcode and a shareable invite link, then drops you into the room as host. The arrow on the tile lets you choose to start with video off.
-- **Join meeting:** by Meeting ID (with or without spaces) or by pasting the full invite link. The meeting is checked before you continue. You enter a display name, can preview your camera and mic, and give the passcode (filled in automatically from invite links).
-- **Schedule meeting:** topic, description, date picker, time picker (30 minute steps like Zoom), duration, optional custom passcode. The link is generated automatically, saved in the database and shown in Upcoming. After saving you get the full invitation to copy.
-- **Meetings page:** Zoom's Meetings tab with Upcoming and Previous lists grouped by day, and a details panel with Start, Copy invitation, Edit and Delete.
+- **Join meeting:** by Meeting ID (with or without spaces) or by pasting the full invite link. The meeting is checked before you continue. You enter a display name and the passcode (filled in automatically from invite links) in the preview window.
+- **Preview window (like Zoom's):** shown before every meeting, for the host too. Live camera with Audio and Video buttons, dropdowns to pick your microphone and camera (remembered for next time), and an "Always show this preview when joining" checkbox.
+- **Schedule meeting:** topic, description, date picker, time picker (30 minute steps like Zoom), duration, optional custom passcode, and options for waiting room and muting people when they join. The link is generated automatically, saved in the database and shown in Upcoming. After saving you get the full invitation to copy.
+- **Meetings page:** Zoom's Meetings tab with Upcoming and Previous lists grouped by day, and a details panel with Start, Copy invitation, Edit, Delete and your notes from that meeting.
 
 **Meeting room**
 - Gallery view (tiles sized to fit the screen at 16:9, like Zoom) and Speaker view.
 - Your real camera and microphone through the browser, with a green border while you talk.
-- Mute / Unmute, Start / Stop Video, Share Screen (your own screen preview), Reactions and Raise Hand.
-- Participants panel with search, host and "me" labels, mic and video status.
+- Mute / Unmute and Start / Stop Video, with a menu on each arrow to switch microphone or camera mid meeting.
+- Share Screen (your own screen preview), Raise Hand, and **Reactions that everyone in the meeting sees**.
+- Participants panel with search, host and "me" labels, mic and video status, **Rename**.
 - Meeting chat to everyone, with an unread badge.
+- **Notes:** private notes that save as you type (like Zoom's "My Notes") and show up later on the Meetings page.
+- **More menu:** Meeting info, plus Record, Whiteboards and Apps placeholders.
 - Meeting info popup (green shield): Meeting ID, host, passcode, invite link.
-- Live meeting timer.
+- Live meeting timer and a "Locked" badge when the host locks the meeting.
 
-**Bonus**
-- **Host controls:** Mute All, mute one person, remove a participant, End meeting for all. The server checks the caller is really the host.
+**Host tools (bonus)**
+- **Host tools panel** like Zoom's: Enable waiting room, Lock meeting, Mute participants upon entry.
+- **Allow all participants to:** chat, rename themselves, unmute themselves, start video, share screen, send reactions. Blocked buttons grey out, and **the server rejects the action too**, so the rules can't be bypassed. The host is never blocked.
+- **Waiting room:** guests wait on a "the host will let you in soon" screen. The host gets a notification and an Admit / Remove / Admit all list.
+- **Suspend participant activities:** one button that mutes everyone, stops their video, turns off chat and the rest, and locks the meeting.
+- **Mute All**, mute one person, **rename** anyone, **remove** a participant, **End meeting for all**.
+- **Make host**, and when the host clicks Leave while others are still in, they are asked to **assign a new host** first. If the host drops off anyway, the person who joined first becomes host automatically.
 - **Responsive:** works on phone, tablet and desktop (side panels become full screen on phones).
 
 ## How it works
@@ -46,7 +55,11 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 
 **Room updates use polling.** Every 2 seconds the room calls `GET /api/meetings/{code}/state`. One call returns the meeting, the participant list, new chat messages and your own status. The same call is also a heartbeat: anyone who stops calling for 30 seconds (closed tab, lost network) is marked as left. When the last person leaves, the meeting moves to "ended" and shows up in Recent.
 
-**Mute sync.** Your mic and camera are controlled in the browser and pushed to the server. When the host mutes you, the next poll sees `is_muted = true` and the browser turns your mic off and shows "The host has muted you". Your own changes win for a few seconds, so an old poll result can't undo a click.
+**Mute sync.** Your mic and camera are controlled in the browser and pushed to the server. When the host mutes you (or suspends activities), the next poll sees `is_muted = true` or `is_video_on = false` and the browser turns your mic or camera off with a message. Your own changes win for a few seconds, so an old poll result can't undo a click.
+
+**Host rules.** The same poll returns the meeting's settings, so when the host flips a switch everyone's buttons update within 2 seconds. The server checks every rule again on each request (chat, reactions, unmute, video, rename, joining a locked meeting), so the rules hold even if someone skips the UI.
+
+**Reactions** are saved as short lived rows. The poll returns reactions from the last few seconds, and each browser animates each reaction once.
 
 ## Database schema
 
@@ -57,6 +70,12 @@ erDiagram
     meetings ||--o{ participants : has
     meetings ||--o{ chat_messages : has
     participants ||--o{ chat_messages : sends
+    meetings ||--|| meeting_settings : "has rules"
+    meetings ||--o{ meeting_notes : has
+    users |o--o{ meeting_notes : writes
+    participants |o--o{ meeting_notes : "writes (guests)"
+    meetings ||--o{ reactions : has
+    participants ||--o{ reactions : sends
 
     users {
         int id PK
@@ -87,7 +106,7 @@ erDiagram
         int user_id FK "NULL for guests"
         string display_name
         enum role "host | attendee"
-        enum status "in_meeting | left | removed"
+        enum status "waiting | in_meeting | left | removed"
         bool is_muted
         bool is_video_on
         bool is_hand_raised
@@ -102,6 +121,36 @@ erDiagram
         text content
         datetime sent_at
     }
+    meeting_settings {
+        int id PK
+        int meeting_id FK,UK
+        bool allow_chat
+        bool allow_unmute
+        bool allow_video
+        bool allow_screen_share
+        bool allow_reactions
+        bool allow_rename
+        bool mute_on_entry
+        bool waiting_room
+        bool is_locked
+        datetime updated_at
+    }
+    meeting_notes {
+        int id PK
+        int meeting_id FK
+        int user_id FK "signed in user, else NULL"
+        int participant_id FK "guests, else NULL"
+        text content
+        datetime created_at
+        datetime updated_at
+    }
+    reactions {
+        int id PK
+        int meeting_id FK
+        int participant_id FK
+        string emoji
+        datetime created_at
+    }
 ```
 
 Design choices:
@@ -110,7 +159,10 @@ Design choices:
 - **One participant row per join.** This keeps a history of who was in each meeting, which is how "Recent meetings" and the meeting duration work.
 - **`status` columns instead of deleting rows.** Leaving or being removed keeps the row, so history and chat authors stay intact.
 - **Chat links to the participant, not the user.** Guests can chat too, and the message shows the name used in that meeting.
-- **Indexes** on `meetings(host_id, status, scheduled_start)` and `meetings(started_at)` for the dashboard queries, `participants(meeting_id, status)` for the live room, and `chat_messages(meeting_id, id)` for fetching new messages.
+- **`meeting_settings` is its own table (one row per meeting)** rather than nine more columns on `meetings`. The meetings table stays focused, settings can grow on their own, and because new tables are created on startup, the live database picked them up without a migration. Meetings created before settings existed get a default row the first time it's needed.
+- **`meeting_notes` has two optional owners.** The signed in user's notes are keyed by `user_id`, so it's the same note if they leave and rejoin. Guests have no user, so their notes are keyed by `participant_id`. Two unique indexes, `(meeting_id, user_id)` and `(meeting_id, participant_id)`, keep one note per person (SQLite ignores NULLs in unique indexes, so each rule only applies to its own kind of note).
+- **`reactions` are rows, not a column on participants,** so several people can react at once and the server can enforce "allow reactions". They're only read for the last few seconds.
+- **Indexes** on `meetings(host_id, status, scheduled_start)` and `meetings(started_at)` for the dashboard queries, `participants(meeting_id, status)` for the live room and waiting room, `chat_messages(meeting_id, id)` for fetching new messages, and `reactions(meeting_id, created_at)` for recent reactions.
 - **Foreign keys are enforced** (`PRAGMA foreign_keys=ON`) with `ON DELETE CASCADE`, so deleting a meeting removes its participants and messages.
 - All times are stored in **UTC** and sent with a timezone, so the browser shows them in local time.
 
@@ -132,10 +184,19 @@ Interactive docs are at `/docs` on the backend.
 | POST | `/api/meetings/{code}/messages` | Send a chat message |
 | POST | `/api/meetings/{code}/mute-all` | Host: mute everyone else |
 | POST | `/api/meetings/{code}/end` | Host: end for everyone |
-| PATCH | `/api/participants/{id}` | Update your own mic, camera, raised hand |
+| PATCH | `/api/participants/{id}` | Update your own mic, camera, raised hand or name (host rules apply) |
 | POST | `/api/participants/{id}/leave` | Leave the meeting |
 | POST | `/api/participants/{id}/mute` | Host: mute one person |
-| POST | `/api/participants/{id}/remove` | Host: remove one person |
+| POST | `/api/participants/{id}/remove` | Host: remove one person (from the meeting or waiting room) |
+| POST | `/api/participants/{id}/admit` | Host: let someone in from the waiting room |
+| POST | `/api/meetings/{code}/admit-all` | Host: let everyone in |
+| POST | `/api/participants/{id}/rename` | Host: rename someone |
+| POST | `/api/participants/{id}/make-host` | Host: hand over the host role |
+| PATCH | `/api/meetings/{code}/settings` | Host: change meeting rules (lock, waiting room, allow chat, ...) |
+| POST | `/api/meetings/{code}/suspend` | Host: suspend participant activities |
+| POST | `/api/meetings/{code}/reactions` | Send a reaction everyone sees |
+| GET / PUT | `/api/meetings/{code}/notes?participant_id=` | Read / save your private notes |
+| GET | `/api/meetings/{code}/notes/mine` | The signed in user's notes, for the Meetings page |
 
 ## Project structure
 
@@ -153,7 +214,7 @@ backend/
     services/          business rules: meetings, participants, codes, errors
   tests/test_api.py
 frontend/
-  app/                 pages: / (home), /meetings, /join, /j/[code] (pre-join), /meeting/[code] (room)
+  app/                 pages: / (home), /meetings, /join, /j/[code] (preview window), /meeting/[code] (room)
   components/          ui/, layout/, home/, modals/, meetings/, room/
   hooks/               useMeetings, useStartMeeting, useMeetingRoom, useLocalMedia, useGalleryLayout, ...
   lib/                 api.ts (all backend calls), types.ts, format.ts, session.ts
@@ -207,19 +268,21 @@ Open http://localhost:3000. To try two people in one meeting, open the invite li
 ## Assumptions and limits
 
 - **No login.** A default user ("Alex Johnson") is always signed in, as the brief allows. `get_current_user` in `dependencies.py` is the one place to change when adding real authentication.
-- **Who is host:** whoever starts the meeting from the dashboard joins with the default user's id and becomes host. People who join from the Join button or an invite link join as guests. Everyone shares the default account, so "host" means "started it from the dashboard".
+- **Who is host:** whoever starts the meeting from the dashboard joins with the default user's id and becomes host. People who join from the Join button or an invite link join as guests. Everyone shares the default account, so "host" means "started it from the dashboard". The host can hand over the role, and the meeting's owner gets it back if they rejoin.
 - **Video between people is not streamed.** Each person sees their own real camera. Other people appear as name tiles with live mic, camera and hand status. Real peer to peer video would need WebRTC plus a signalling server; the room is built so this could be added later without changing the database.
-- **Screen sharing and reactions are local.** You see your own shared screen and reactions; others don't. Raised hands are shared through the server.
+- **Screen sharing is local.** You see your own shared screen; others don't (that needs WebRTC). Reactions, raised hands and every host rule are shared through the server.
+- **Notes are private.** Only the person who wrote them can read them.
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Host controls are checked on the server,** but without login the host is identified by participant id. Real auth would replace this with a token.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Placeholders:** Team Chat, Calendar, Docs, Apps, Search, Settings, Notifications and Sign out show a "not part of this demo" message.
+- **Placeholders:** Team Chat, Calendar, Docs, Apps, Search, Settings, Notifications, Sign out, and Record, Whiteboards and Apps in the meeting's More menu show a "not part of this demo" message.
 - Times use the browser's time zone.
 - The Zoom wordmark is drawn as styled text, not the official logo file.
 
 ## What I would add next
 
-- WebRTC video and audio between participants (with a TURN server)
+- WebRTC video, audio and screen sharing between participants (with a TURN server)
+- Virtual backgrounds and background blur (MediaPipe selfie segmentation)
 - WebSockets for instant updates
 - Real authentication (JWT) and multiple accounts
 - Waiting room, recurring meetings, calendar invites (.ics)

@@ -3,7 +3,7 @@
 export type MeetingType = "instant" | "scheduled";
 export type MeetingStatus = "scheduled" | "live" | "ended";
 export type ParticipantRole = "host" | "attendee";
-export type ParticipantStatus = "in_meeting" | "left" | "removed";
+export type ParticipantStatus = "waiting" | "in_meeting" | "left" | "removed";
 
 export interface User {
   id: number;
@@ -11,6 +11,19 @@ export interface User {
   email: string;
   avatar_color: string;
   personal_meeting_id: string;
+}
+
+/** Rules the host controls for a meeting. */
+export interface MeetingSettings {
+  allow_chat: boolean;
+  allow_unmute: boolean;
+  allow_video: boolean;
+  allow_screen_share: boolean;
+  allow_reactions: boolean;
+  allow_rename: boolean;
+  mute_on_entry: boolean;
+  waiting_room: boolean;
+  is_locked: boolean;
 }
 
 export interface Meeting {
@@ -30,15 +43,18 @@ export interface Meeting {
   created_at: string;
   invite_link: string;
   participant_count: number;
+  settings: MeetingSettings;
 }
 
 export interface MeetingLookup {
   meeting_code: string;
   title: string;
+  host_id: number;
   host_name: string;
   status: MeetingStatus;
   scheduled_start: string | null;
   requires_passcode: boolean;
+  is_locked: boolean;
 }
 
 export interface Participant {
@@ -63,11 +79,26 @@ export interface ChatMessage {
   sent_at: string;
 }
 
+export interface Reaction {
+  id: number;
+  participant_id: number;
+  emoji: string;
+}
+
+export interface Note {
+  content: string;
+  updated_at: string | null;
+}
+
 export interface RoomState {
   meeting: Meeting;
   me: Participant;
   participants: Participant[];
+  /** People in the waiting room. Only filled in for the host. */
+  waiting: Participant[];
   messages: ChatMessage[];
+  /** Reactions from the last few seconds. */
+  reactions: Reaction[];
 }
 
 export interface ScheduleInput {
@@ -76,6 +107,8 @@ export interface ScheduleInput {
   scheduled_start: string; // ISO string with timezone
   duration_minutes: number;
   passcode?: string;
+  waiting_room?: boolean;
+  mute_on_entry?: boolean;
 }
 
 export interface JoinInput {

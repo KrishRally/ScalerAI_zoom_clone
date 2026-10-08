@@ -3,6 +3,7 @@
 import VideoTile from "./VideoTile";
 import VideoPreview from "./VideoPreview";
 import { useGalleryLayout } from "@/hooks/useGalleryLayout";
+import type { ReactionsByPerson } from "@/hooks/useMeetingRoom";
 import type { Participant } from "@/lib/types";
 
 export type ViewMode = "gallery" | "speaker";
@@ -12,19 +13,20 @@ interface Props {
   meId: number;
   myStream: MediaStream | null;
   speaking: boolean;
-  reaction: { emoji: string; id: number } | null;
+  /** The emoji floating over each person right now. */
+  reactions: ReactionsByPerson;
   view: ViewMode;
   screen: MediaStream | null;
 }
 
 /** The video area: gallery grid, speaker view, or your shared screen. */
-export default function MeetingStage({ participants, meId, myStream, speaking, reaction, view, screen }: Props) {
+export default function MeetingStage({ participants, meId, myStream, speaking, reactions, view, screen }: Props) {
   const tileProps = (p: Participant) => ({
     participant: p,
     isMe: p.id === meId,
     stream: p.id === meId ? myStream : null,
     speaking: p.id === meId && speaking,
-    reaction: p.id === meId ? reaction : null,
+    reaction: reactions[p.id] ?? null,
   });
 
   // Screen share and speaker view both use one big area with a strip of small tiles.

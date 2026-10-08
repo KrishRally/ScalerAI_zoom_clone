@@ -53,3 +53,42 @@ export function saveDisplayName(name: string) {
     // ignore
   }
 }
+
+// The microphone and camera picked on the preview screen, remembered across meetings.
+export type DeviceKind = "mic" | "cam";
+const deviceKey = (kind: DeviceKind) => `zoom-device-${kind}`;
+
+export function loadDevice(kind: DeviceKind): string | undefined {
+  try {
+    return localStorage.getItem(deviceKey(kind)) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveDevice(kind: DeviceKind, deviceId: string) {
+  try {
+    localStorage.setItem(deviceKey(kind), deviceId);
+  } catch {
+    // ignore
+  }
+}
+
+// "Always show this preview when joining", like Zoom. On by default.
+const PREVIEW_KEY = "zoom-show-preview";
+
+export function loadShowPreview(): boolean {
+  try {
+    return localStorage.getItem(PREVIEW_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function saveShowPreview(on: boolean) {
+  try {
+    localStorage.setItem(PREVIEW_KEY, on ? "on" : "off");
+  } catch {
+    // ignore
+  }
+}

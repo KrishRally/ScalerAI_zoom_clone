@@ -49,6 +49,8 @@ export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }
   const [minutes, setMinutes] = useState(0);
   const [autoPasscode, setAutoPasscode] = useState(true);
   const [passcode, setPasscode] = useState("");
+  const [waitingRoom, setWaitingRoom] = useState(false);
+  const [muteOnEntry, setMuteOnEntry] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -65,6 +67,8 @@ export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }
     setMinutes(duration % 60);
     setAutoPasscode(true);
     setPasscode("");
+    setWaitingRoom(editing?.settings.waiting_room ?? false);
+    setMuteOnEntry(editing?.settings.mute_on_entry ?? false);
     setError(null);
   }, [open, editing, user]);
 
@@ -97,6 +101,8 @@ export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }
         description: description.trim() || undefined,
         scheduled_start: start.toISOString(),
         duration_minutes: duration,
+        waiting_room: waitingRoom,
+        mute_on_entry: muteOnEntry,
       };
       const saved = editing
         ? await api.updateMeeting(editing.meeting_code, payload)
@@ -205,6 +211,20 @@ export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }
             )}
           </div>
         )}
+
+        <div className="text-sm">
+          <span className="label">Options</span>
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 accent-zoom-blue" checked={waitingRoom} onChange={(e) => setWaitingRoom(e.target.checked)} />
+              Enable waiting room
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 accent-zoom-blue" checked={muteOnEntry} onChange={(e) => setMuteOnEntry(e.target.checked)} />
+              Mute participants upon entry
+            </label>
+          </div>
+        </div>
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-zoom-red">{error}</p>}
 
