@@ -138,3 +138,16 @@ def test_last_person_leaving_ends_meeting(client):
         "/api/meetings/lookup", params={"q": meeting["meeting_code"]}
     ).json()
     assert lookup["status"] == "ended"
+
+
+def test_stale_participants_are_expired(client, monkeypatch):
+    from app.services import participants as participant_service
+
+    meeting, host = _start_instant(client)
+    # Pretend the timeout is zero, as if the host closed the tab long ago.
+    monkeypatch.setattr(participant_service, "PARTICIPANT_TIMEOUT_SECONDS", -1)
+    client.get("/api/meetings/upcoming")
+    lookup = client.get(
+        "/api/meetings/lookup", params={"q": meeting["meeting_code"]}
+    ).json()
+    assert lookup["status"] == "ended"

@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 def upcoming_meetings(
     db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    participant_service.expire_stale_everywhere(db)
     return [
         meeting_service.to_meeting_out(db, m)
         for m in meeting_service.list_upcoming(db, user)
@@ -26,6 +27,7 @@ def upcoming_meetings(
 
 @router.get("/recent", response_model=list[schemas.MeetingOut])
 def recent_meetings(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    participant_service.expire_stale_everywhere(db)
     return [
         meeting_service.to_meeting_out(db, m) for m in meeting_service.list_recent(db, user)
     ]
@@ -64,6 +66,7 @@ def lookup_meeting(
 ):
     """Check that a meeting exists before showing the join screen."""
     meeting = meeting_service.get_meeting(db, q)
+    participant_service.expire_stale_participants(db, meeting)
     return schemas.MeetingLookup(
         meeting_code=meeting.meeting_code,
         title=meeting.title,

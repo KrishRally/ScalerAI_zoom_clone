@@ -103,6 +103,17 @@ def expire_stale_participants(db: Session, meeting: Meeting) -> None:
         db.commit()
 
 
+def expire_stale_everywhere(db: Session) -> None:
+    """Run the same clean up for every live meeting.
+
+    Called when the dashboard loads, so a meeting everyone left by closing
+    their tab still moves from "live" to "ended".
+    """
+    live = db.scalars(select(Meeting).where(Meeting.status == MeetingStatus.live)).all()
+    for meeting in live:
+        expire_stale_participants(db, meeting)
+
+
 def update_participant(
     db: Session, participant: Participant, data: schemas.ParticipantUpdate
 ) -> Participant:
