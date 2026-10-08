@@ -60,9 +60,9 @@ Each image below will appear automatically once its file is there.
 | | |
 |---|---|
 | ![Meetings page](docs/screenshots/meetings.png) <br> **Meetings:** month calendar and day by day agenda | ![Meeting room](docs/screenshots/meeting-room.png) <br> **Meeting room:** two people, Zoom style toolbar |
-| ![Share screen window](docs/screenshots/share-screen.png) <br> **Share screen:** what to share, then how to present | ![Host controls](docs/screenshots/host-controls.png) <br> **Host controls:** participants panel and Host tools |
+| ![Calendar](docs/screenshots/calendar.png) <br> **Calendar** week view | ![Host controls](docs/screenshots/host-controls.png) <br> **Host controls:** participants panel and Host tools |
 | ![Preview window](docs/screenshots/preview.png) <br> **Preview window** before joining | ![Team Chat](docs/screenshots/chat.png) <br> **Team Chat** |
-| ![Calendar](docs/screenshots/calendar.png) <br> **Calendar** week view | ![Phone view](docs/screenshots/mobile.png) <br> **On a phone** |
+
 
 ---
 
