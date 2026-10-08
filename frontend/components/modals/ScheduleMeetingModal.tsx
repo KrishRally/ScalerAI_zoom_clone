@@ -6,7 +6,7 @@ import Modal from "@/components/ui/Modal";
 import Spinner from "@/components/ui/Spinner";
 import { api } from "@/lib/api";
 import type { Meeting } from "@/lib/types";
-import { useCurrentUser } from "@/components/providers/UserProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 
 interface Props {
   open: boolean;
@@ -40,7 +40,7 @@ function nextHalfHour(): Date {
 const timeZone = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "Local time";
 
 export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }: Props) {
-  const { user } = useCurrentUser();
+  const { user, settings } = useAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
@@ -67,10 +67,13 @@ export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }
     setMinutes(duration % 60);
     setAutoPasscode(true);
     setPasscode("");
-    setWaitingRoom(editing?.settings.waiting_room ?? false);
-    setMuteOnEntry(editing?.settings.mute_on_entry ?? false);
+    // New meetings start from the defaults on the Settings page.
+    setWaitingRoom(editing?.settings.waiting_room ?? settings?.default_waiting_room ?? false);
+    setMuteOnEntry(editing?.settings.mute_on_entry ?? settings?.default_mute_on_entry ?? false);
     setError(null);
-  }, [open, editing, user]);
+    // Only refill when the dialog opens or switches meeting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing]);
 
   // Make sure an edited meeting's odd time (e.g. 10:15) is still selectable.
   const timeOptions = useMemo(() => {

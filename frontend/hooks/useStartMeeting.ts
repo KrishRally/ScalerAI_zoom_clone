@@ -3,28 +3,38 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { loadShowPreview, saveMeetingSession } from "@/lib/session";
-import { useCurrentUser } from "@/components/providers/UserProvider";
+import { saveMeetingSession, saveParticipantToken } from "@/lib/session";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
+import type { JoinResult } from "@/lib/types";
+
+/** Remember who we are in this tab, so the meeting room can act as us. */
+export function rememberJoin(meetingCode: string, me: JoinResult) {
+  saveParticipantToken(me.id, me.participant_token);
+  saveMeetingSession(meetingCode, {
+    participantId: me.id,
+    startMuted: me.is_muted,
+    startVideoOn: me.is_video_on,
+  });
+}
 
 /**
  * Starting a meeting as the host.
  *
  * Normally this opens the preview window first (/j/<id>?start=1). If the user
- * unticked "Always show this preview", we join straight away with our user id
- * (so the server makes us host), remember who we are in this tab, and open the room.
+ * turned off "Always show the preview" in Settings, we join straight away.
+ * The server makes us host because our sign in proves we own the meeting.
  */
 export function useStartMeeting() {
   const router = useRouter();
-  const { user } = useCurrentUser();
+  const { user, settings } = useAuth();
   const toast = useToast();
   const [starting, setStarting] = useState(false);
 
   const startExisting = useCallback(
     async (meetingCode: string, opts: { videoOn?: boolean } = {}) => {
-      const videoOn = opts.videoOn ?? true;
-      // The preview window looks up the user itself, so it doesn't need to wait for it here.
-      if (loadShowPreview()) {
+      const videoOn = opts.videoOn ?? settings?.start_with_video ?? true;
+      if (settings?.show_preview ?? true) {
         router.push(`/j/${meetingCode}?start=1${videoOn ? "" : "&video=off"}`);
         return;
       }
@@ -36,22 +46,17 @@ export function useStartMeeting() {
       try {
         const me = await api.joinMeeting(meetingCode, {
           display_name: user.name,
-          user_id: user.id,
           is_video_on: videoOn,
-          is_muted: false,
+          is_muted: settings?.join_muted ?? false,
         });
-        saveMeetingSession(meetingCode, {
-          participantId: me.id,
-          startMuted: me.is_muted,
-          startVideoOn: me.is_video_on,
-        });
+        rememberJoin(meetingCode, me);
         router.push(`/meeting/${meetingCode}`);
       } catch (e) {
         toast((e as Error).message, "error");
         setStarting(false);
       }
     },
-    [user, router, toast],
+    [user, settings, router, toast],
   );
 
   const startInstant = useCallback(

@@ -7,7 +7,7 @@ import Spinner from "@/components/ui/Spinner";
 import { api } from "@/lib/api";
 import { parseMeetingInput } from "@/lib/format";
 import { loadDisplayName } from "@/lib/session";
-import { useCurrentUser } from "@/components/providers/UserProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 
 interface Props {
   open: boolean;
@@ -17,7 +17,7 @@ interface Props {
 /** Zoom's "Join meeting" dialog: Meeting ID or link, your name, audio and video options. */
 export default function JoinMeetingModal({ open, onClose }: Props) {
   const router = useRouter();
-  const { user } = useCurrentUser();
+  const { user } = useAuth();
   const [meetingInput, setMeetingInput] = useState("");
   const [name, setName] = useState("");
   const [noAudio, setNoAudio] = useState(false);

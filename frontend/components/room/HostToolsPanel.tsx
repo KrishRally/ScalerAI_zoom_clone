@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import PanelShell from "./PanelShell";
+import Switch from "@/components/ui/Switch";
 import type { MeetingSettings } from "@/lib/types";
 
 interface Props {
@@ -101,16 +102,7 @@ function Row({
         <p className="font-medium">{label}</p>
         {hint && <p className="text-xs text-zoom-muted">{hint}</p>}
       </div>
-      <button
-        role="switch"
-        aria-checked={on}
-        aria-label={label}
-        disabled={busy}
-        onClick={onToggle}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 ${on ? "bg-zoom-blue" : "bg-[#C9CCD1]"}`}
-      >
-        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
-      </button>
+      <Switch on={on} label={label} onToggle={onToggle} disabled={busy} />
     </div>
   );
 }

@@ -9,90 +9,37 @@ import Spinner from "@/components/ui/Spinner";
 import ZoomLogo from "@/components/ui/ZoomLogo";
 import DeviceSelect from "@/components/room/DeviceSelect";
 import VideoPreview from "@/components/room/VideoPreview";
-import { useCurrentUser } from "@/components/providers/UserProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { useLocalMedia } from "@/hooks/useLocalMedia";
 import { api } from "@/lib/api";
 import { formatMeetingCode } from "@/lib/format";
-import {
-  loadDisplayName,
-  loadShowPreview,
-  saveDisplayName,
-  saveMeetingSession,
-  saveShowPreview,
-} from "@/lib/session";
+import { rememberJoin } from "@/hooks/useStartMeeting";
+import { loadDisplayName, loadShowPreview, saveDisplayName, saveShowPreview } from "@/lib/session";
 import type { MeetingLookup } from "@/lib/types";
 
 /**
  * The preview window shown before every meeting, like Zoom's.
  *
  * - Guests land here from invite links (/j/<id>?pwd=...) or the Join dialog.
- * - The host lands here with ?start=1 when starting a meeting from the dashboard.
+ *   They don't need an account.
+ * - The meeting's owner, when signed in, sees "Start" and joins as host.
+ *   The server decides this from the sign in, not from anything on this page.
  *
- * It checks the meeting exists, shows your camera, lets you pick your mic and
- * camera, and asks for a name (and passcode for guests) before joining.
+ * This outer part checks the meeting exists and waits for the account to load,
+ * so the camera starts with the right defaults.
  */
 function PreJoin() {
   const { code } = useParams<{ code: string }>();
-  const params = useSearchParams();
-  const router = useRouter();
-  const { user, error: userError } = useCurrentUser();
-
+  const { loading } = useAuth();
   const [meeting, setMeeting] = useState<MeetingLookup | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [passcode, setPasscode] = useState(params.get("pwd") ?? "");
-  const [showPreview, setShowPreview] = useState(true);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const [joining, setJoining] = useState(false);
-
-  const media = useLocalMedia({
-    audio: params.get("audio") !== "off",
-    video: params.get("video") !== "off",
-  });
-
-  // Starting as host only applies to the meeting's owner (the signed in user).
-  const isHostStart = params.get("start") === "1" && !!user && meeting?.host_id === user.id;
 
   useEffect(() => {
-    setShowPreview(loadShowPreview());
     api
       .lookupMeeting(code)
       .then(setMeeting)
       .catch((e: Error) => setLookupError(e.message));
   }, [code]);
-
-  useEffect(() => {
-    if (isHostStart && user) setName(user.name);
-    else setName(params.get("name") || loadDisplayName());
-  }, [isHostStart, user, params]);
-
-  async function handleJoin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return setJoinError("Please enter your name.");
-    setJoining(true);
-    setJoinError(null);
-    try {
-      const me = await api.joinMeeting(code, {
-        display_name: name.trim(),
-        passcode: isHostStart ? undefined : passcode.trim(),
-        user_id: isHostStart ? user!.id : undefined,
-        is_muted: !media.audioOn,
-        is_video_on: media.videoOn,
-      });
-      if (!isHostStart) saveDisplayName(name.trim());
-      saveShowPreview(showPreview);
-      saveMeetingSession(code, {
-        participantId: me.id,
-        startMuted: me.is_muted,
-        startVideoOn: me.is_video_on,
-      });
-      media.stopAll(); // the room opens the camera again with the same devices
-      router.push(`/meeting/${code}`);
-    } catch (err) {
-      setJoinError((err as Error).message);
-      setJoining(false);
-    }
-  }
 
   if (lookupError) {
     return (
@@ -110,14 +57,64 @@ function PreJoin() {
     );
   }
 
-  // When starting as host, wait for the account so we show "Start", not the guest form.
-  const waitingForUser = params.get("start") === "1" && !user && !userError;
-  if (!meeting || waitingForUser) {
+  if (!meeting || loading) {
     return (
       <Shell>
         <div className="flex justify-center py-20 text-zoom-blue"><Spinner className="h-8 w-8" /></div>
       </Shell>
     );
+  }
+
+  return <PreJoinForm code={code} meeting={meeting} />;
+}
+
+/** Camera preview, device pickers, name and passcode. */
+function PreJoinForm({ code, meeting }: { code: string; meeting: MeetingLookup }) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const { user, settings, updateSettings } = useAuth();
+
+  // Only the signed in owner of the meeting starts it as host.
+  const isHostStart = !!user && meeting.host_id === user.id;
+
+  const [name, setName] = useState(() => user?.name || params.get("name") || loadDisplayName());
+  const [passcode, setPasscode] = useState(params.get("pwd") ?? "");
+  const [showPreview, setShowPreview] = useState(() => settings?.show_preview ?? loadShowPreview());
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
+
+  // Links can turn audio or video off; otherwise use the signed in user's defaults.
+  const media = useLocalMedia({
+    audio: params.get("audio") === "off" ? false : !(settings?.join_muted ?? false),
+    video: params.get("video") === "off" ? false : settings?.start_with_video ?? true,
+  });
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return setJoinError("Please enter your name.");
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const me = await api.joinMeeting(code, {
+        display_name: name.trim(),
+        passcode: isHostStart ? undefined : passcode.trim(),
+        is_muted: !media.audioOn,
+        is_video_on: media.videoOn,
+      });
+      if (!user) saveDisplayName(name.trim());
+      // Signed in users keep this choice in their settings; guests in this browser.
+      if (user) {
+        if (settings && settings.show_preview !== showPreview) updateSettings({ show_preview: showPreview }).catch(() => {});
+      } else {
+        saveShowPreview(showPreview);
+      }
+      rememberJoin(code, me);
+      media.stopAll(); // the room opens the camera again with the same devices
+      router.push(`/meeting/${code}`);
+    } catch (err) {
+      setJoinError((err as Error).message);
+      setJoining(false);
+    }
   }
 
   const ended = meeting.status === "ended" && !isHostStart;

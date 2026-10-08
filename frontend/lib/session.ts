@@ -113,3 +113,53 @@ export function getClientId(): string {
     return "";
   }
 }
+
+// ---------- Sign in ----------
+// The sign in token is kept in localStorage so you stay signed in across visits.
+// (The API lives on another domain, so a cookie would need extra cross-site setup.)
+const AUTH_KEY = "zoom-auth-token";
+
+export function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem(AUTH_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveAuthToken(token: string) {
+  try {
+    localStorage.setItem(AUTH_KEY, token);
+  } catch {
+    // ignore
+  }
+}
+
+export function clearAuthToken() {
+  try {
+    localStorage.removeItem(AUTH_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// ---------- Participant keys ----------
+// When you join a meeting the server gives you a secret key. Every action in the
+// room sends it, so nobody can act as you just by knowing your participant number.
+const participantKey = (participantId: number) => `zoom-participant-token:${participantId}`;
+
+export function saveParticipantToken(participantId: number, token: string) {
+  try {
+    sessionStorage.setItem(participantKey(participantId), token);
+  } catch {
+    // ignore
+  }
+}
+
+export function getParticipantToken(participantId: number): string | null {
+  try {
+    return sessionStorage.getItem(participantKey(participantId));
+  } catch {
+    return null;
+  }
+}

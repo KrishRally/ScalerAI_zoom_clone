@@ -10,6 +10,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { useMeetings } from "@/hooks/useMeetings";
 import { useScheduleDialogs } from "@/hooks/useScheduleDialogs";
 import { useStartMeeting } from "@/hooks/useStartMeeting";
+import RequireAuth from "@/components/providers/RequireAuth";
 import { formatMeetingCode, formatTime, relativeDay, timeRange } from "@/lib/format";
 import type { Meeting } from "@/lib/types";
 
@@ -158,7 +159,9 @@ export default function MeetingsPage() {
   // useSearchParams needs a Suspense boundary in the Next.js app router.
   return (
     <Suspense fallback={null}>
-      <MeetingsView />
+      <RequireAuth>
+        <MeetingsView />
+      </RequireAuth>
     </Suspense>
   );
 }

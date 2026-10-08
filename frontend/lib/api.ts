@@ -1,8 +1,10 @@
 // Every call to the backend goes through this file.
 
 import type {
+  AuthResult,
   ChatMessage,
   JoinInput,
+  JoinResult,
   Meeting,
   MeetingLookup,
   MeetingSettings,
@@ -12,8 +14,9 @@ import type {
   RoomState,
   ScheduleInput,
   User,
+  UserSettings,
 } from "./types";
-import { getClientId } from "./session";
+import { getAuthToken, getClientId, getParticipantToken } from "./session";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
@@ -26,12 +29,30 @@ export class ApiError extends Error {
   }
 }
 
+/** Called when the server says our sign in is no longer valid. Set by the AuthProvider. */
+let onUnauthorized: (() => void) | null = null;
+export const setUnauthorizedHandler = (fn: (() => void) | null) => {
+  onUnauthorized = fn;
+};
+
+/** Headers that prove who we are: the signed in account, if any. */
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/** Headers that prove we are this participant in a meeting. */
+function asParticipant(participantId: number): Record<string, string> {
+  const token = getParticipantToken(participantId);
+  return token ? { "X-Participant-Token": token } : {};
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
       ...options,
-      headers: { "Content-Type": "application/json", ...options.headers },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...options.headers },
     });
   } catch {
     throw new ApiError("Unable to reach the server. Please check your connection.", 0);
@@ -48,6 +69,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch {
       // Body was not JSON; keep the generic message.
     }
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
     throw new ApiError(message, res.status);
   }
 
@@ -55,51 +77,72 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-const post = <T>(path: string, body?: unknown) =>
-  request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+const post = <T>(path: string, body?: unknown, headers: Record<string, string> = {}) =>
+  request<T>(path, {
+    method: "POST",
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers,
+  });
+
+/** POST as a participant, for actions inside a meeting. */
+const postAs = <T>(participantId: number, path: string, body?: unknown) =>
+  post<T>(path, body, asParticipant(participantId));
 
 const code = (c: string) => encodeURIComponent(c);
 
 export const api = {
+  // ---------- Account ----------
+  signUp: (name: string, email: string, password: string) =>
+    post<AuthResult>("/api/auth/signup", { name, email, password }),
+  signIn: (email: string, password: string) => post<AuthResult>("/api/auth/login", { email, password }),
+  signOut: () => post<void>("/api/auth/logout"),
   me: () => request<User>("/api/users/me"),
+  updateProfile: (changes: Partial<Pick<User, "name" | "avatar_color">>) =>
+    request<User>("/api/users/me", { method: "PATCH", body: JSON.stringify(changes) }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    post<void>("/api/users/me/password", { current_password: currentPassword, new_password: newPassword }),
+  getUserSettings: () => request<UserSettings>("/api/users/me/settings"),
+  updateUserSettings: (changes: Partial<UserSettings>) =>
+    request<UserSettings>("/api/users/me/settings", { method: "PATCH", body: JSON.stringify(changes) }),
 
+  // ---------- Meetings ----------
   upcomingMeetings: () => request<Meeting[]>("/api/meetings/upcoming"),
   recentMeetings: () => request<Meeting[]>("/api/meetings/recent"),
   getMeeting: (c: string) => request<Meeting>(`/api/meetings/${code(c)}`),
-  lookupMeeting: (q: string) =>
-    request<MeetingLookup>(`/api/meetings/lookup?q=${encodeURIComponent(q)}`),
+  lookupMeeting: (q: string) => request<MeetingLookup>(`/api/meetings/lookup?q=${encodeURIComponent(q)}`),
 
-  createInstantMeeting: (title?: string) =>
-    post<Meeting>("/api/meetings/instant", title ? { title } : {}),
+  createInstantMeeting: (title?: string) => post<Meeting>("/api/meetings/instant", title ? { title } : {}),
   scheduleMeeting: (input: ScheduleInput) => post<Meeting>("/api/meetings/scheduled", input),
   updateMeeting: (c: string, input: Partial<ScheduleInput>) =>
     request<Meeting>(`/api/meetings/${code(c)}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteMeeting: (c: string) => request<void>(`/api/meetings/${code(c)}`, { method: "DELETE" }),
+  myNote: (c: string) => request<Note>(`/api/meetings/${code(c)}/notes/mine`),
 
+  // ---------- Inside a meeting ----------
+  // Joining sends the sign in token (if any); the server decides who is host from it.
   joinMeeting: (c: string, input: JoinInput) =>
-    post<Participant>(`/api/meetings/${code(c)}/join`, { client_id: getClientId() || undefined, ...input }),
+    post<JoinResult>(`/api/meetings/${code(c)}/join`, { client_id: getClientId() || undefined, ...input }),
   roomState: (c: string, participantId: number, afterMessageId: number) =>
     request<RoomState>(
       `/api/meetings/${code(c)}/state?participant_id=${participantId}&after_message_id=${afterMessageId}`,
+      { headers: asParticipant(participantId) },
     ),
   sendMessage: (c: string, participantId: number, content: string) =>
-    post<ChatMessage>(`/api/meetings/${code(c)}/messages`, {
-      participant_id: participantId,
-      content,
-    }),
-
+    postAs<ChatMessage>(participantId, `/api/meetings/${code(c)}/messages`, { participant_id: participantId, content }),
   sendReaction: (c: string, participantId: number, emoji: string) =>
-    post<Reaction>(`/api/meetings/${code(c)}/reactions`, { participant_id: participantId, emoji }),
+    postAs<Reaction>(participantId, `/api/meetings/${code(c)}/reactions`, { participant_id: participantId, emoji }),
 
   // Notes: private to whoever writes them.
   getNote: (c: string, participantId: number) =>
-    request<Note>(`/api/meetings/${code(c)}/notes?participant_id=${participantId}`),
+    request<Note>(`/api/meetings/${code(c)}/notes?participant_id=${participantId}`, {
+      headers: asParticipant(participantId),
+    }),
   saveNote: (c: string, participantId: number, content: string) =>
     request<Note>(`/api/meetings/${code(c)}/notes`, {
       method: "PUT",
       body: JSON.stringify({ participant_id: participantId, content }),
+      headers: asParticipant(participantId),
     }),
-  myNote: (c: string) => request<Note>(`/api/meetings/${code(c)}/notes/mine`),
 
   updateSelf: (
     participantId: number,
@@ -108,38 +151,45 @@ export const api = {
     request<Participant>(`/api/participants/${participantId}`, {
       method: "PATCH",
       body: JSON.stringify(changes),
+      headers: asParticipant(participantId),
     }),
-  leave: (participantId: number) => post<void>(`/api/participants/${participantId}/leave`),
+  leave: (participantId: number) => postAs<void>(participantId, `/api/participants/${participantId}/leave`),
   /** Like leave, but still delivered if the page is going away (Back button, closing the tab). */
   leaveInBackground: (participantId: number) => {
-    fetch(`${API_URL}/api/participants/${participantId}/leave`, { method: "POST", keepalive: true }).catch(() => {});
+    fetch(`${API_URL}/api/participants/${participantId}/leave`, {
+      method: "POST",
+      keepalive: true,
+      headers: asParticipant(participantId),
+    }).catch(() => {});
   },
 
-  // Host controls. requester_id lets the server check the caller is the host.
+  // ---------- Host controls ----------
+  // requester_id says who is asking; their participant key proves it.
   muteAll: (c: string, requesterId: number) =>
-    post<{ muted: number }>(`/api/meetings/${code(c)}/mute-all`, { requester_id: requesterId }),
+    postAs<{ muted: number }>(requesterId, `/api/meetings/${code(c)}/mute-all`, { requester_id: requesterId }),
   muteParticipant: (participantId: number, requesterId: number) =>
-    post<Participant>(`/api/participants/${participantId}/mute`, { requester_id: requesterId }),
+    postAs<Participant>(requesterId, `/api/participants/${participantId}/mute`, { requester_id: requesterId }),
   removeParticipant: (participantId: number, requesterId: number) =>
-    post<void>(`/api/participants/${participantId}/remove`, { requester_id: requesterId }),
+    postAs<void>(requesterId, `/api/participants/${participantId}/remove`, { requester_id: requesterId }),
   endMeeting: (c: string, requesterId: number) =>
-    post<Meeting>(`/api/meetings/${code(c)}/end`, { requester_id: requesterId }),
+    postAs<Meeting>(requesterId, `/api/meetings/${code(c)}/end`, { requester_id: requesterId }),
   updateSettings: (c: string, requesterId: number, changes: Partial<MeetingSettings>) =>
     request<MeetingSettings>(`/api/meetings/${code(c)}/settings`, {
       method: "PATCH",
       body: JSON.stringify({ requester_id: requesterId, ...changes }),
+      headers: asParticipant(requesterId),
     }),
   suspend: (c: string, requesterId: number) =>
-    post<MeetingSettings>(`/api/meetings/${code(c)}/suspend`, { requester_id: requesterId }),
+    postAs<MeetingSettings>(requesterId, `/api/meetings/${code(c)}/suspend`, { requester_id: requesterId }),
   admit: (participantId: number, requesterId: number) =>
-    post<Participant>(`/api/participants/${participantId}/admit`, { requester_id: requesterId }),
+    postAs<Participant>(requesterId, `/api/participants/${participantId}/admit`, { requester_id: requesterId }),
   admitAll: (c: string, requesterId: number) =>
-    post<{ admitted: number }>(`/api/meetings/${code(c)}/admit-all`, { requester_id: requesterId }),
+    postAs<{ admitted: number }>(requesterId, `/api/meetings/${code(c)}/admit-all`, { requester_id: requesterId }),
   renameParticipant: (participantId: number, requesterId: number, displayName: string) =>
-    post<Participant>(`/api/participants/${participantId}/rename`, {
+    postAs<Participant>(requesterId, `/api/participants/${participantId}/rename`, {
       requester_id: requesterId,
       display_name: displayName,
     }),
   makeHost: (participantId: number, requesterId: number) =>
-    post<Participant>(`/api/participants/${participantId}/make-host`, { requester_id: requesterId }),
+    postAs<Participant>(requesterId, `/api/participants/${participantId}/make-host`, { requester_id: requesterId }),
 };

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bell,
@@ -10,12 +10,13 @@ import {
   Home,
   MessageSquare,
   Search,
+  LogOut,
   Settings,
   Video,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import ZoomLogo from "@/components/ui/ZoomLogo";
-import { useCurrentUser } from "@/components/providers/UserProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
 
 // Only Home and Meetings are real pages. The rest are placeholders, like in the brief.
@@ -29,7 +30,8 @@ const TABS = [
 
 export default function TopNav() {
   const pathname = usePathname();
-  const { user } = useCurrentUser();
+  const { user, signOut } = useAuth();
+  const router = useRouter();
   const toast = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -86,13 +88,15 @@ export default function TopNav() {
           >
             <Bell className="h-5 w-5" />
           </button>
-          <button
-            className="hidden rounded-md p-2 text-zoom-muted hover:bg-zoom-surface hover:text-zoom-ink sm:block"
+          <Link
+            href="/settings"
+            className={`hidden rounded-md p-2 hover:bg-zoom-surface hover:text-zoom-ink sm:block ${
+              pathname.startsWith("/settings") ? "text-zoom-blue" : "text-zoom-muted"
+            }`}
             aria-label="Settings"
-            onClick={() => comingSoon("Settings")}
           >
             <Settings className="h-5 w-5" />
-          </button>
+          </Link>
           <div className="relative">
             <button
               onClick={() => setMenuOpen((o) => !o)}
@@ -121,18 +125,23 @@ export default function TopNav() {
                     <p className="font-semibold text-zoom-ink">{user.personal_meeting_id.replace(/(\d{3})(\d{3})(\d{4})/, "$1 $2 $3")}</p>
                   </div>
                   <div className="mt-3 border-t border-zoom-border pt-2">
-                    {["Settings", "Help", "Sign out"].map((item) => (
-                      <button
-                        key={item}
-                        onClick={() => {
-                          setMenuOpen(false);
-                          comingSoon(item);
-                        }}
-                        className="block w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-zoom-surface"
-                      >
-                        {item}
-                      </button>
-                    ))}
+                    <Link
+                      href="/settings"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-zoom-surface"
+                    >
+                      <Settings className="h-4 w-4 text-zoom-muted" /> Settings
+                    </Link>
+                    <button
+                      onClick={async () => {
+                        setMenuOpen(false);
+                        await signOut();
+                        router.replace("/signin");
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-zoom-surface"
+                    >
+                      <LogOut className="h-4 w-4 text-zoom-muted" /> Sign out
+                    </button>
                   </div>
                 </div>
               </>

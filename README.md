@@ -4,6 +4,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 
 - **Live app:** https://scaleraizoomclone-frontend.vercel.app
 - **API docs (Swagger):** https://scaleraizoomclone-production.up.railway.app/docs
+- **Demo account:** `alex.johnson@example.com` / `zoomdemo123` (already has meetings). Or sign up with your own email.
 
 ## Tech stack
 
@@ -17,6 +18,11 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 | Hosting | Vercel (frontend), Railway (backend + volume for SQLite) | Vercel is built for Next.js; Railway keeps the SQLite file on a persistent disk |
 
 ## Features
+
+**Accounts (bonus)**
+- **Sign up** with your name, any real email address and a password, **sign in**, and **sign out**. No restrictions on who can sign up. Emails are checked for a valid format and are case-insensitive (`Krish@Gmail.com` and `krish@gmail.com` are the same account).
+- The dashboard, Meetings and Settings pages need an account; signed out visitors are sent to Sign in and brought back afterwards. **Guests can still join a meeting from an invite link without an account**, like Zoom.
+- **Settings page:** change your name and profile colour, change your password (signs out your other devices), meeting defaults (start with video, join muted, always show preview, waiting room and mute on entry for new meetings), and test and pick your microphone and camera.
 
 **Core**
 - **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, search, settings, profile menu), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
@@ -61,6 +67,12 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 
 **Host rules.** The same poll returns the meeting's settings, so when the host flips a switch everyone's buttons update within 2 seconds. The server checks every rule again on each request (chat, reactions, unmute, video, rename, joining a locked meeting), so the rules hold even if someone skips the UI.
 
+**Sign in.** Passwords are hashed with salted PBKDF2-SHA256 (Python's standard library, 600,000 rounds), never stored as text. Signing in creates a random session token; the browser keeps it and sends it as `Authorization: Bearer <token>`. The database stores only a SHA-256 hash of the token in `auth_sessions`, so signing out (deleting the row) makes it stop working immediately. Wrong password and unknown email give the same message, so the form can't be used to find out who has an account.
+
+**Who is host.** The server decides from the sign in: only the meeting's owner joins as host. Nothing the browser sends can claim host.
+
+**Participant keys.** Participant ids are plain numbers anyone could guess. So when you join, the server returns a secret `participant_token` (only its hash is stored). Every action in the room, including host controls, must send it in an `X-Participant-Token` header, or the server refuses.
+
 **Reactions** are saved as short lived rows. The poll returns reactions from the last few seconds, and each browser animates each reaction once.
 
 ## Database schema
@@ -68,6 +80,8 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 ```mermaid
 erDiagram
     users ||--o{ meetings : hosts
+    users ||--o{ auth_sessions : "signed in as"
+    users ||--|| user_settings : "has defaults"
     users |o--o{ participants : "joins as (optional)"
     meetings ||--o{ participants : has
     meetings ||--o{ chat_messages : has
@@ -85,6 +99,7 @@ erDiagram
         string email UK
         string avatar_color
         string personal_meeting_id UK
+        string password_hash "salted PBKDF2"
         datetime created_at
     }
     meetings {
@@ -113,6 +128,7 @@ erDiagram
         bool is_video_on
         bool is_hand_raised
         string client_id "per browser tab, for rejoin"
+        string token_hash "hash of the participant key"
         datetime joined_at
         datetime left_at
         datetime last_seen_at "heartbeat"
@@ -147,6 +163,23 @@ erDiagram
         datetime created_at
         datetime updated_at
     }
+    auth_sessions {
+        int id PK
+        int user_id FK
+        string token_hash UK "SHA-256 of the session token"
+        datetime created_at
+        datetime expires_at
+    }
+    user_settings {
+        int id PK
+        int user_id FK,UK
+        bool start_with_video
+        bool join_muted
+        bool show_preview
+        bool default_waiting_room
+        bool default_mute_on_entry
+        datetime updated_at
+    }
     reactions {
         int id PK
         int meeting_id FK
@@ -163,6 +196,8 @@ Design choices:
 - **`status` columns instead of deleting rows.** Leaving or being removed keeps the row, so history and chat authors stay intact.
 - **Chat links to the participant, not the user.** Guests can chat too, and the message shows the name used in that meeting.
 - **Schema changes on a live database.** New tables are created on startup by `create_all()`. New nullable columns on existing tables (like `participants.client_id`) are added by a small `add_missing_columns()` step in `database.py`, so the deployed SQLite file upgrades without losing data. A bigger project would use Alembic.
+- **Sessions are rows, not JWTs.** A database session can be revoked instantly (sign out, or "sign out other devices" after a password change) and costs one indexed lookup. Only token hashes are stored, so a copy of the database can't be used to sign in.
+- **`user_settings` vs `meeting_settings`.** User settings are personal defaults; each new meeting copies them into its own `meeting_settings` row, which the host can then change during that meeting without touching their defaults.
 - **`meeting_settings` is its own table (one row per meeting)** rather than nine more columns on `meetings`. The meetings table stays focused, settings can grow on their own, and because new tables are created on startup, the live database picked them up without a migration. Meetings created before settings existed get a default row the first time it's needed.
 - **`meeting_notes` has two optional owners.** The signed in user's notes are keyed by `user_id`, so it's the same note if they leave and rejoin. Guests have no user, so their notes are keyed by `participant_id`. Two unique indexes, `(meeting_id, user_id)` and `(meeting_id, participant_id)`, keep one note per person (SQLite ignores NULLs in unique indexes, so each rule only applies to its own kind of note).
 - **`reactions` are rows, not a column on participants,** so several people can react at once and the server can enforce "allow reactions". They're only read for the last few seconds.
@@ -176,7 +211,12 @@ Interactive docs are at `/docs` on the backend.
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/users/me` | The default signed in user |
+| POST | `/api/auth/signup` | Create an account (name, email, password), returns a session token |
+| POST | `/api/auth/login` | Sign in, returns a session token |
+| POST | `/api/auth/logout` | Sign out (deletes the session) |
+| GET / PATCH | `/api/users/me` | The signed in user / change name or colour |
+| POST | `/api/users/me/password` | Change password (signs out other devices) |
+| GET / PATCH | `/api/users/me/settings` | Personal meeting defaults |
 | GET | `/api/meetings/upcoming` | Scheduled meetings that haven't finished |
 | GET | `/api/meetings/recent` | Meetings that have started, newest first |
 | POST | `/api/meetings/instant` | Create an instant meeting |
@@ -212,7 +252,7 @@ backend/
     database.py        engine, session, foreign keys on
     models.py          SQLAlchemy tables
     schemas.py         Pydantic request/response shapes
-    dependencies.py    get_current_user (the default user)
+    dependencies.py    who is signed in (bearer token) and the participant key header
     seed.py            sample users and meetings
     routers/           thin HTTP layer: users, meetings, participants
     services/          business rules: meetings, participants, codes, errors
@@ -249,7 +289,7 @@ npm install
 cp .env.example .env.local       # NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
-Open http://localhost:3000. To try two people in one meeting, open the invite link in a second browser window (a private window works well).
+Open http://localhost:3000 and sign in with the demo account (`alex.johnson@example.com` / `zoomdemo123`) or sign up. To try two people in one meeting, open the invite link in a private window or another tab; guests don't need an account.
 
 ## Deployment
 
@@ -261,6 +301,7 @@ Open http://localhost:3000. To try two people in one meeting, open the invite li
    - `DATABASE_URL` = `sqlite:////data/zoom.db`
    - `FRONTEND_URL` = your Vercel URL, for example `https://your-app.vercel.app`
    - `CORS_ORIGINS` = the same Vercel URL
+   - Optional: `DEMO_PASSWORD` to change the demo account's password
 5. Under **Settings > Networking**, click **Generate Domain**. Check `https://<domain>/api/health` returns `{"status":"ok"}`.
 
 **Frontend on Vercel**
@@ -271,15 +312,16 @@ Open http://localhost:3000. To try two people in one meeting, open the invite li
 
 ## Assumptions and limits
 
-- **No login.** A default user ("Alex Johnson") is always signed in, as the brief allows. `get_current_user` in `dependencies.py` is the one place to change when adding real authentication.
-- **Who is host:** whoever starts the meeting from the dashboard joins with the default user's id and becomes host. People who join from the Join button or an invite link join as guests. Everyone shares the default account, so "host" means "started it from the dashboard". The host can hand over the role, and the meeting's owner gets it back if they rejoin.
+- **Email and password sign in.** Any email can sign up. Emails are not verified with a code, and there is no "forgot password" yet: both need an email sending service (see "What I would add next").
+- **The sign in token is kept in `localStorage`.** The API is on a different domain from the site, so a cookie would need cross-site cookie setup. The trade-off is that a cross-site scripting bug could read the token; React escapes all output, and sessions expire after 30 days.
+- **Who is host:** the signed in owner of the meeting. People who join with an invite link, with or without an account, join as attendees. The host can hand over the role, and the owner gets it back if they rejoin.
 - **Video between people is not streamed.** Each person sees their own real camera. Other people appear as name tiles with live mic, camera and hand status. Real peer to peer video would need WebRTC plus a signalling server; the room is built so this could be added later without changing the database.
 - **Screen sharing is local.** You see your own shared screen; others don't (that needs WebRTC). Reactions, raised hands and every host rule are shared through the server.
 - **Notes are private.** Only the person who wrote them can read them.
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
-- **Host controls are checked on the server,** but without login the host is identified by participant id. Real auth would replace this with a token.
+- **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Placeholders:** Team Chat, Calendar, Docs, Search, Settings, Notifications and Sign out show a "not part of this demo" message.
+- **Placeholders:** Team Chat, Calendar, Docs, Search and Notifications show a "not part of this demo" message.
 - Times use the browser's time zone.
 - The Zoom wordmark is drawn as styled text, not the official logo file.
 
@@ -288,6 +330,7 @@ Open http://localhost:3000. To try two people in one meeting, open the invite li
 - WebRTC video, audio and screen sharing between participants (with a TURN server)
 - Virtual backgrounds and background blur (MediaPipe selfie segmentation)
 - WebSockets for instant updates
-- Real authentication (JWT) and multiple accounts
+- Email verification codes and "forgot password" (needs an email service such as Resend or SendGrid)
+- "Sign in with Google" (needs a Google OAuth client)
 - Waiting room, recurring meetings, calendar invites (.ics)
 - Database migrations with Alembic

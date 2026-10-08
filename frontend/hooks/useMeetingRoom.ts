@@ -61,7 +61,8 @@ export function useMeetingRoom(code: string, participantId: number | null) {
       else if (state.me.status === "removed") setEndReason("removed");
       else if (state.me.status === "left") setEndReason(state.meeting.status === "ended" ? "ended" : "left");
     } catch (e) {
-      if (e instanceof ApiError && (e.status === 404 || e.status === 400)) setEndReason("missing");
+      // 403: this tab no longer holds a valid participant key (for example an old session).
+      if (e instanceof ApiError && [400, 403, 404].includes(e.status)) setEndReason("missing");
       else setConnectionLost(true);
     }
   }, [code, participantId, showReaction]);

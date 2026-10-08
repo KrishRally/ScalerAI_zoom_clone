@@ -46,6 +46,25 @@ export interface Meeting {
   settings: MeetingSettings;
 }
 
+/** Personal defaults from the Settings page. */
+export interface UserSettings {
+  start_with_video: boolean;
+  join_muted: boolean;
+  show_preview: boolean;
+  default_waiting_room: boolean;
+  default_mute_on_entry: boolean;
+}
+
+export interface AuthResult {
+  token: string;
+  user: User;
+}
+
+/** Returned once when joining. The token proves who you are for later actions. */
+export interface JoinResult extends Participant {
+  participant_token: string;
+}
+
 export interface MeetingLookup {
   meeting_code: string;
   title: string;
@@ -114,7 +133,6 @@ export interface ScheduleInput {
 export interface JoinInput {
   display_name: string;
   passcode?: string;
-  user_id?: number;
   is_muted?: boolean;
   is_video_on?: boolean;
   client_id?: string;

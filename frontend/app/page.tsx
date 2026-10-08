@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CalendarDays, ChevronDown, MonitorUp, Plus, Video } from "lucide-react";
 import TopNav from "@/components/layout/TopNav";
 import ActionTile from "@/components/home/ActionTile";
@@ -15,33 +15,29 @@ import { useToast } from "@/components/ui/Toast";
 import { useMeetings } from "@/hooks/useMeetings";
 import { useScheduleDialogs } from "@/hooks/useScheduleDialogs";
 import { useStartMeeting } from "@/hooks/useStartMeeting";
-
-const VIDEO_PREF_KEY = "zoom-start-with-video";
+import RequireAuth from "@/components/providers/RequireAuth";
+import { useAuth } from "@/components/providers/AuthProvider";
 
 export default function HomePage() {
+  return (
+    <RequireAuth>
+      <Dashboard />
+    </RequireAuth>
+  );
+}
+
+function Dashboard() {
   const toast = useToast();
   const { upcoming, recent, loading, error, reload } = useMeetings();
   const { startInstant, startExisting, starting } = useStartMeeting();
   const { openSchedule, openEdit, remove, dialogs } = useScheduleDialogs(reload);
   const [joinOpen, setJoinOpen] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
-  const [startWithVideo, setStartWithVideo] = useState(true);
-
-  useEffect(() => {
-    try {
-      setStartWithVideo(localStorage.getItem(VIDEO_PREF_KEY) !== "off");
-    } catch {
-      // keep default
-    }
-  }, []);
-
+  // "Start with video" is a personal setting, also changeable on the Settings page.
+  const { settings, updateSettings } = useAuth();
+  const startWithVideo = settings?.start_with_video ?? true;
   const toggleVideoPref = (on: boolean) => {
-    setStartWithVideo(on);
-    try {
-      localStorage.setItem(VIDEO_PREF_KEY, on ? "on" : "off");
-    } catch {
-      // ignore
-    }
+    updateSettings({ start_with_video: on }).catch((e) => toast((e as Error).message, "error"));
   };
 
   return (

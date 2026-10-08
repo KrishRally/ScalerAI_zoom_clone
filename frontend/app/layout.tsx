@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Lato } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
-import { UserProvider } from "@/components/providers/UserProvider";
+import { AuthProvider } from "@/components/providers/AuthProvider";
 
 const lato = Lato({
   subsets: ["latin"],
@@ -24,9 +24,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={lato.variable}>
       <body>
-        <UserProvider>
+        <AuthProvider>
           <ToastProvider>{children}</ToastProvider>
-        </UserProvider>
+        </AuthProvider>
       </body>
     </html>
   );
