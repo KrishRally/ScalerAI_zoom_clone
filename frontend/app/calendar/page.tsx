@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import TopNav from "@/components/layout/TopNav";
+import AppShell from "@/components/layout/AppShell";
 import WeekGrid from "@/components/calendar/WeekGrid";
 import EventDetails from "@/components/calendar/EventDetails";
 import RequireAuth from "@/components/providers/RequireAuth";
@@ -71,8 +71,8 @@ function CalendarView() {
   };
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-white">
-      <TopNav />
+    <AppShell>
+    <div className="flex h-full flex-col bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-zoom-border px-4 py-3">
         <button className="btn-secondary px-3 py-1.5" onClick={() => setAnchor(startOfDay(new Date()))}>Today</button>
         <div className="flex">
@@ -121,6 +121,7 @@ function CalendarView() {
       />
       {dialogs}
     </div>
+    </AppShell>
   );
 }
 

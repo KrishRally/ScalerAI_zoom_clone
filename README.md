@@ -13,10 +13,10 @@ Every item from the assignment, and where to find it.
 | Requirement | Status | Where |
 |---|---|---|
 | **1. Landing dashboard** | | |
-| Clean Zoom style UI | Done | Home page `/` (`frontend/app/page.tsx`, `components/home/`) |
-| Navbar with profile / settings | Done, and they work | `components/layout/TopNav.tsx`: profile menu (name, email, Personal Meeting ID, Sign out), gear opens `/settings`, plus working search and notifications |
-| New Meeting / Join Meeting / Schedule Meeting buttons | Done | The big tiles on Home (`components/home/ActionTile.tsx`) |
-| Upcoming meetings section | Done | Home, and the Meetings tab (`/meetings`) |
+| Clean Zoom style UI | Done | Matches the Zoom Workplace app layout: Home page `/` (`frontend/app/page.tsx`, `components/home/`) inside `components/layout/AppShell.tsx` |
+| Navbar with profile / settings | Done, and they work | `components/layout/AppShell.tsx`: Zoom Workplace top bar (back / forward, search, notifications, calendar, profile menu with Personal Meeting ID and Sign out) and side bar with **Settings** at the bottom |
+| New Meeting / Join Meeting / Schedule Meeting buttons | Done | The row of buttons on Home (`components/home/ActionTile.tsx`): New meeting, Join, Schedule, Share screen, My Notes |
+| Upcoming meetings section | Done | Home: the "Today" card (day by day) and the Upcoming meetings tab; also the Meetings section (`/meetings`) |
 | Recent meetings section | Done | Home, and Meetings > Recent |
 | **2. Instant meeting** | | |
 | Create a meeting instantly | Done | New meeting tile → `POST /api/meetings/instant` (`services/meetings.py`, `create_instant_meeting`) |
@@ -68,7 +68,8 @@ Every item from the assignment, and where to find it.
 - **Docs:** create documents from templates (Blank, Meeting notes, Project plan, 1:1 agenda), edit with **autosave**, see who edited last, search and filter (All / Owned by me / Shared with me), and **share by email** as editor or viewer. Viewers get a read-only page. Edits from others show up while you're not typing.
 
 **Core**
-- **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, search, settings, profile menu with Sign out), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
+- **Layout like the Zoom Workplace app:** a grey top bar (logo, back / forward, recent, centred search, quick actions, notifications, calendar, profile), a side bar (Home, Meetings, Chat, Calendar, Docs, and Settings at the bottom) and each page on a white rounded panel. Phones get the sections as tabs along the bottom.
+- **Home:** a big centred clock and date, the five buttons (New meeting with a Start with video option, Join, Schedule, Share screen, My Notes), a **"Today" card** with Today / previous / next day and a date picker (meetings of that day with Start, or the beach umbrella "No meetings scheduled" picture), then **Upcoming meetings** and **Recent meetings** tabs.
 - **Instant meeting:** one click creates a meeting with a unique 10 digit Meeting ID, a passcode and a shareable invite link, then drops you into the room as host. The arrow on the tile lets you choose to start with video off.
 - **Join meeting:** by Meeting ID (with or without spaces) or by pasting the full invite link. The meeting is checked before you continue. You enter a display name and the passcode (filled in automatically from invite links) in the preview window.
 - **Preview window (like Zoom's):** shown before every meeting, for the host too. Live camera with Audio and Video buttons, dropdowns to pick your microphone and camera (remembered for next time), and an "Always show this preview when joining" checkbox.
@@ -429,7 +430,7 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Search** looks through your own meetings (hosted or joined) by title or Meeting ID. Pasting a full Meeting ID or invite link that isn't yours offers "Join meeting". Ctrl+F (Cmd+F) jumps to it, like in Zoom. It is shown on wide screens only.
+- **Search** looks through your own meetings (hosted or joined) by title or Meeting ID. Pasting a full Meeting ID or invite link that isn't yours offers "Join meeting". Ctrl+E (Cmd+E) jumps to it, like in Zoom. It is shown on wide screens only.
 - **Sample meetings refill themselves.** Their times count from the first start, so after a few days they would all be in the past. When the demo user has no upcoming meetings left, a fresh set is added (`refresh_sample_meetings`, on startup and when the dashboard loads). It only happens when the list is empty, so a meeting you delete does not come back.
 - **Notifications are built, not stored.** The bell is made on each request from data the app already has (unread chats, `document_members.added_at`, upcoming meetings), so there is no notifications table to keep in sync. One column, `users.notifications_seen_at`, decides which items are new. It refreshes every 20 seconds.
 - **Sample chats are demo-only.** You only see chats you are a member of, and only the demo account and its seeded teammates are in the sample chats. On startup, `keep_sample_chats_private` also removes accounts that older versions auto-added to "General" (with their posts there).

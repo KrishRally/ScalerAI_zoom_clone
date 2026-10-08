@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Plus } from "lucide-react";
-import TopNav from "@/components/layout/TopNav";
+import AppShell from "@/components/layout/AppShell";
 import MeetingDetails from "@/components/meetings/MeetingDetails";
 import Spinner from "@/components/ui/Spinner";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -56,8 +56,8 @@ function MeetingsView() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-white">
-      <TopNav />
+    <AppShell>
+    <div className="flex h-full flex-col bg-white">
       <div className="flex min-h-0 flex-1">
         {/* List */}
         <aside
@@ -157,6 +157,7 @@ function MeetingsView() {
       </div>
       {dialogs}
     </div>
+    </AppShell>
   );
 }
 

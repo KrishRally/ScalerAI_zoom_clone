@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
-import TopNav from "@/components/layout/TopNav";
+import AppShell from "@/components/layout/AppShell";
 import RequireAuth from "@/components/providers/RequireAuth";
 import { useAuth } from "@/components/providers/AuthProvider";
 import AudioVideoSection from "@/components/settings/AudioVideoSection";
@@ -23,8 +23,8 @@ function SettingsView() {
   const router = useRouter();
 
   return (
-    <div className="min-h-screen bg-zoom-surface">
-      <TopNav />
+    <AppShell>
+    <div className="min-h-full bg-zoom-surface">
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 md:flex-row md:py-10">
         <aside className="md:w-52 md:shrink-0">
           <h1 className="mb-3 text-2xl font-bold text-zoom-ink">Settings</h1>
@@ -60,6 +60,7 @@ function SettingsView() {
         </main>
       </div>
     </div>
+    </AppShell>
   );
 }
 

@@ -17,6 +17,8 @@ const config: Config = {
           muted: "#6E7680",
           border: "#E4E6EB",
           surface: "#F7F8FA",
+          // The grey frame around the white page in the Zoom Workplace app.
+          chrome: "#EDEFF3",
           red: "#E02828",
           "red-hover": "#C51F1F",
           green: "#00C853",

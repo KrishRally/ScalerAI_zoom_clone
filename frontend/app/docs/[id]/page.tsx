@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Lock, Trash2, UserPlus } from "lucide-react";
-import TopNav from "@/components/layout/TopNav";
+import AppShell from "@/components/layout/AppShell";
 import ShareDialog from "@/components/docs/ShareDialog";
 import RequireAuth from "@/components/providers/RequireAuth";
 import Avatar from "@/components/ui/Avatar";
@@ -113,23 +113,25 @@ function DocEditor() {
 
   if (notFound) {
     return (
-      <div className="min-h-screen bg-zoom-surface">
-        <TopNav />
+      <AppShell>
+      <div className="min-h-full bg-zoom-surface">
         <div className="mx-auto mt-16 max-w-md rounded-xl border border-zoom-border bg-white p-8 text-center shadow-card">
           <h1 className="text-xl font-bold text-zoom-ink">Document not found</h1>
           <p className="mt-2 text-sm text-zoom-muted">It may have been deleted, or it hasn&apos;t been shared with you.</p>
           <Link href="/docs" className="btn-primary mt-6">Back to Docs</Link>
         </div>
       </div>
+      </AppShell>
     );
   }
 
   if (!doc) {
     return (
-      <div className="min-h-screen bg-zoom-surface">
-        <TopNav />
+      <AppShell>
+      <div className="min-h-full bg-zoom-surface">
         <div className="flex justify-center py-20 text-zoom-blue"><Spinner className="h-8 w-8" /></div>
       </div>
+      </AppShell>
     );
   }
 
@@ -137,10 +139,10 @@ function DocEditor() {
   const words = content.trim() ? content.trim().split(/\s+/).length : 0;
 
   return (
-    <div className="flex min-h-screen flex-col bg-zoom-surface">
-      <TopNav />
+    <AppShell>
+    <div className="flex min-h-full flex-col bg-zoom-surface">
       {/* Toolbar */}
-      <div className="sticky top-14 z-30 flex flex-wrap items-center gap-2 border-b border-zoom-border bg-white px-4 py-2">
+      <div className="sticky top-0 z-30 flex flex-wrap items-center gap-2 border-b border-zoom-border bg-white px-4 py-2">
         <Link href="/docs" className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-zoom-blue hover:bg-zoom-blue-light">
           <ArrowLeft className="h-4 w-4" /> Docs
         </Link>
@@ -201,6 +203,7 @@ function DocEditor() {
 
       <ShareDialog doc={doc} open={shareOpen} onClose={() => setShareOpen(false)} onChange={setDoc} />
     </div>
+    </AppShell>
   );
 }
 

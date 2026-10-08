@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import TopNav from "@/components/layout/TopNav";
+import AppShell from "@/components/layout/AppShell";
 import ChannelList from "@/components/chat/ChannelList";
 import Conversation from "@/components/chat/Conversation";
 import NewChatDialog, { type NewChatMode } from "@/components/chat/NewChatDialog";
@@ -79,8 +79,8 @@ function ChatView() {
   if (!user) return null;
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-white">
-      <TopNav />
+    <AppShell>
+    <div className="flex h-full flex-col bg-white">
       {error && !channels ? (
         <ErrorState message={error} onRetry={reload} />
       ) : !channels ? (
@@ -130,6 +130,7 @@ function ChatView() {
         }}
       />
     </div>
+    </AppShell>
   );
 }
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FileText, Plus, Search, Users } from "lucide-react";
-import TopNav from "@/components/layout/TopNav";
+import AppShell from "@/components/layout/AppShell";
 import RequireAuth from "@/components/providers/RequireAuth";
 import Avatar from "@/components/ui/Avatar";
 import Spinner from "@/components/ui/Spinner";
@@ -61,8 +61,8 @@ function DocsHome() {
   }, [docs, filter, query]);
 
   return (
-    <div className="min-h-screen bg-zoom-surface">
-      <TopNav />
+    <AppShell>
+    <div className="min-h-full bg-zoom-surface">
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:py-10">
         <h1 className="text-2xl font-bold text-zoom-ink">Docs</h1>
 
@@ -153,6 +153,7 @@ function DocsHome() {
         </section>
       </main>
     </div>
+    </AppShell>
   );
 }
 

@@ -5,13 +5,15 @@ interface Props {
   color?: string;
   size?: number;
   className?: string;
+  /** A circle instead of a rounded square (the top bar profile picture). */
+  round?: boolean;
 }
 
 /** Rounded square with initials, like Zoom's default profile picture. */
-export default function Avatar({ name, color, size = 32, className = "" }: Props) {
+export default function Avatar({ name, color, size = 32, className = "", round = false }: Props) {
   return (
     <span
-      className={`inline-flex shrink-0 select-none items-center justify-center rounded-[28%] font-bold text-white ${className}`}
+      className={`inline-flex shrink-0 select-none items-center justify-center ${round ? "rounded-full" : "rounded-[28%]"} font-bold text-white ${className}`}
       style={{
         width: size,
         height: size,

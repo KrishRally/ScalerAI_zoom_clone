@@ -21,11 +21,12 @@ export default function SearchBox() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const [focused, setFocused] = useState(false);
 
-  // Ctrl+F (Cmd+F on Mac) jumps to the search box, like in Zoom.
+  // Ctrl+E (Cmd+E on Mac) jumps to the search box, like in Zoom.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") {
         e.preventDefault();
         inputRef.current?.focus();
       }
@@ -96,12 +97,18 @@ export default function SearchBox() {
 
   return (
     <div className="relative">
-      <label className="flex items-center gap-2 rounded-lg bg-zoom-surface px-3 py-2 text-sm text-zoom-muted ring-zoom-blue/30 focus-within:ring-2">
-        <Search className="h-4 w-4" />
+      <label className="relative flex h-9 items-center gap-2 rounded-lg bg-black/[0.07] px-3 text-sm text-zoom-text ring-zoom-blue/30 focus-within:bg-white focus-within:ring-2">
+        {/* Zoom shows the hint centred until you click in */}
+        {!q && !focused && (
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5 text-zoom-text">
+            <Search className="h-4 w-4" /> Search (Ctrl+E)
+          </span>
+        )}
+        {(q || focused) && <Search className="h-4 w-4 shrink-0 text-zoom-muted" />}
         <input
           ref={inputRef}
           className="w-full bg-transparent text-zoom-text outline-none placeholder:text-zoom-muted"
-          placeholder="Search (Ctrl+F)"
+          placeholder={focused ? "Search meetings by name or ID" : ""}
           aria-label="Search meetings"
           role="combobox"
           aria-expanded={showPanel}
@@ -111,8 +118,14 @@ export default function SearchBox() {
             setQ(e.target.value);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setOpen(false)}
+          onFocus={() => {
+            setFocused(true);
+            setOpen(true);
+          }}
+          onBlur={() => {
+            setFocused(false);
+            setOpen(false);
+          }}
           onKeyDown={onKeyDown}
         />
         {loading && <Spinner className="h-4 w-4 text-zoom-blue" />}
