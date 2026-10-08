@@ -495,3 +495,51 @@ def test_search_meetings(client, auth):
     assert client.get("/api/meetings/search", params={"q": "zzz-nothing"}, headers=auth).json() == []
     assert client.get("/api/meetings/search", params={"q": " "}, headers=auth).json() == []
     assert client.get("/api/meetings/search", params={"q": "sprint"}).status_code == 401
+
+
+# ---------- WebRTC signalling and screen sharing ----------
+
+
+def test_signals_are_delivered_once(client, start_instant):
+    meeting, host = start_instant()
+    guest = _guest(client, meeting, "Gina").json()
+    offer = {"type": "offer", "session": "abc", "sdp": "v=0..."}
+    res = client.post(f"/api/participants/{host['id']}/signals", json={"to": guest["id"], "data": offer}, headers=pt(host))
+    assert res.status_code == 204
+
+    got = client.get(f"/api/participants/{guest['id']}/signals", headers=pt(guest)).json()
+    assert got == [{"id": got[0]["id"], "from_id": host["id"], "data": offer}]
+    # Handed over once, then gone.
+    assert client.get(f"/api/participants/{guest['id']}/signals", headers=pt(guest)).json() == []
+
+
+def test_signals_need_the_right_key_and_meeting(client, start_instant):
+    meeting, host = start_instant()
+    guest = _guest(client, meeting, "Gus").json()
+    other_meeting, other_host = start_instant()
+    data = {"type": "offer"}
+    # Someone else's key can't read your notes or send as you.
+    assert client.get(f"/api/participants/{guest['id']}/signals", headers=pt(host)).status_code == 403
+    assert client.post(f"/api/participants/{guest['id']}/signals", json={"to": host["id"], "data": data}, headers=pt(host)).status_code == 403
+    # Only to people in the same meeting, and not to yourself.
+    assert client.post(f"/api/participants/{host['id']}/signals", json={"to": other_host["id"], "data": data}, headers=pt(host)).status_code == 400
+    assert client.post(f"/api/participants/{host['id']}/signals", json={"to": host["id"], "data": data}, headers=pt(host)).status_code == 400
+    # Size cap.
+    big = {"sdp": "x" * 70_000}
+    assert client.post(f"/api/participants/{host['id']}/signals", json={"to": guest["id"], "data": big}, headers=pt(host)).status_code == 422
+
+
+def test_screen_share_flag_follows_host_rules(client, start_instant):
+    meeting, host = start_instant()
+    guest = _guest(client, meeting, "Sam").json()
+    code = meeting["meeting_code"]
+    on = {"is_sharing_screen": True}
+    assert client.patch(f"/api/participants/{guest['id']}", json=on, headers=pt(guest)).json()["is_sharing_screen"] is True
+
+    # The host turns screen sharing off: the guest stops sharing and can't start again.
+    client.patch(f"/api/meetings/{code}/settings", json={"requester_id": host["id"], "allow_screen_share": False}, headers=pt(host))
+    people = {p["id"]: p for p in _state(client, code, guest)["participants"]}
+    assert people[guest["id"]]["is_sharing_screen"] is False
+    assert client.patch(f"/api/participants/{guest['id']}", json=on, headers=pt(guest)).status_code == 403
+    # The host can still share.
+    assert client.patch(f"/api/participants/{host['id']}", json=on, headers=pt(host)).json()["is_sharing_screen"] is True

@@ -1,6 +1,7 @@
 // Every call to the backend goes through this file.
 
 import type {
+  SignalData,
   AuthResult,
   Channel,
   ChannelMessage,
@@ -189,7 +190,7 @@ export const api = {
 
   updateSelf: (
     participantId: number,
-    changes: Partial<Pick<Participant, "is_muted" | "is_video_on" | "is_hand_raised" | "display_name">>,
+    changes: Partial<Pick<Participant, "is_muted" | "is_video_on" | "is_hand_raised" | "is_sharing_screen" | "display_name">>,
   ) =>
     request<Participant>(`/api/participants/${participantId}`, {
       method: "PATCH",
@@ -197,6 +198,14 @@ export const api = {
       headers: asParticipant(participantId),
     }),
   leave: (participantId: number) => postAs<void>(participantId, `/api/participants/${participantId}/leave`),
+
+  // ---------- WebRTC signalling: connection notes passed between browsers ----------
+  sendSignal: (participantId: number, to: number, data: SignalData) =>
+    postAs<void>(participantId, `/api/participants/${participantId}/signals`, { to, data }),
+  takeSignals: (participantId: number) =>
+    request<{ id: number; from_id: number; data: SignalData }[]>(`/api/participants/${participantId}/signals`, {
+      headers: asParticipant(participantId),
+    }),
   /** Like leave, but still delivered if the page is going away (Back button, closing the tab). */
   leaveInBackground: (participantId: number) => {
     fetch(`${API_URL}/api/participants/${participantId}/leave`, {

@@ -86,8 +86,16 @@ export interface Participant {
   is_muted: boolean;
   is_video_on: boolean;
   is_hand_raised: boolean;
+  is_sharing_screen?: boolean | null;
   joined_at: string;
   left_at: string | null;
+}
+
+/** A WebRTC offer or answer. `session` ties an answer to the offer it replies to. */
+export interface SignalData {
+  type: "offer" | "answer";
+  session: string;
+  sdp: string;
 }
 
 export interface ChatMessage {

@@ -1,5 +1,6 @@
 """Participant rules: join, waiting room, leave, check in, host controls, chat, reactions, notes."""
 
+import json
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from app.models import (
     ParticipantRole,
     ParticipantStatus,
     Reaction,
+    Signal,
     User,
     utcnow,
 )
@@ -242,6 +244,8 @@ def update_participant(
             raise Forbidden("The host has disabled starting video")
         if "display_name" in changes and not settings.allow_rename:
             raise Forbidden("The host has disabled renaming")
+        if changes.get("is_sharing_screen") is True and not settings.allow_screen_share:
+            raise Forbidden("The host has disabled screen sharing")
 
     for field, value in changes.items():
         setattr(participant, field, value)
@@ -353,12 +357,21 @@ def update_settings(
     for field, value in changes.items():
         if value is not None:
             setattr(settings, field, value)
+    # Turning screen sharing off stops everyone but the host who is sharing.
+    if changes.get("allow_screen_share") is False:
+        _stop_attendee_sharing(db, meeting)
     # Turning the waiting room off lets everyone who was waiting in, like Zoom.
     if changes.get("waiting_room") is False:
         for p in waiting_participants(db, meeting):
             _admit(p)
     db.commit()
     return schemas.SettingsOut.model_validate(settings)
+
+
+def _stop_attendee_sharing(db: Session, meeting: Meeting) -> None:
+    for p in active_participants(db, meeting):
+        if p.role != ParticipantRole.host:
+            p.is_sharing_screen = False
 
 
 def suspend_activities(db: Session, meeting: Meeting, requester_id: int) -> schemas.SettingsOut:
@@ -379,6 +392,7 @@ def suspend_activities(db: Session, meeting: Meeting, requester_id: int) -> sche
         if p.id != host.id:
             p.is_muted = True
             p.is_video_on = False
+            p.is_sharing_screen = False
     db.commit()
     return schemas.SettingsOut.model_validate(settings)
 
@@ -558,3 +572,44 @@ def room_state(
         if in_meeting
         else [],
     )
+
+
+# ---------- WebRTC signalling ----------
+
+SIGNAL_MAX_AGE = timedelta(minutes=2)
+
+
+def send_signal(db: Session, sender: Participant, data: schemas.SignalIn) -> None:
+    """Pass a connection note to another person in the same meeting."""
+    target = db.get(Participant, data.to)
+    if (
+        sender.status != ParticipantStatus.in_meeting
+        or target is None
+        or target.meeting_id != sender.meeting_id
+        or target.status != ParticipantStatus.in_meeting
+        or target.id == sender.id
+    ):
+        raise BadRequest("That person is not in this meeting")
+    db.add(
+        Signal(
+            meeting_id=sender.meeting_id,
+            from_participant_id=sender.id,
+            to_participant_id=target.id,
+            payload=json.dumps(data.data),
+        )
+    )
+    db.commit()
+
+
+def take_signals(db: Session, me: Participant) -> list[schemas.SignalOut]:
+    """Notes waiting for this person, oldest first. They are deleted once handed over."""
+    # Old notes nobody collected (the person left) are cleared out too.
+    db.query(Signal).filter(Signal.created_at < utcnow() - SIGNAL_MAX_AGE).delete()
+    rows = db.scalars(
+        select(Signal).where(Signal.to_participant_id == me.id).order_by(Signal.id)
+    ).all()
+    out = [schemas.SignalOut(id=r.id, from_id=r.from_participant_id, data=json.loads(r.payload)) for r in rows]
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return out

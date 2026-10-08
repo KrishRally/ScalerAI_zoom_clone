@@ -95,6 +95,7 @@ Every item from the assignment, and where to find it.
 - **Suspend participant activities:** one button that mutes everyone, stops their video, turns off chat and the rest, and locks the meeting.
 - **Mute All**, mute one person, **rename** anyone, **remove** a participant, **End meeting for all**.
 - **Make host**, and when the host clicks Leave while others are still in, they are asked to **assign a new host** first. If the host drops off anyway, the person who joined first becomes host automatically.
+- **Real audio, video and screen sharing between people (WebRTC):** everyone hears and sees everyone else. Mute, camera off, switching mic or camera and screen sharing all reach the others right away. When someone shares, everyone's view switches to that screen ("You are viewing Alex's screen"). The green "talking" border and speaker view follow whoever is actually speaking.
 - **Responsive:** works on phone, tablet and desktop (side panels become full screen on phones).
 
 ## How it works
@@ -104,6 +105,14 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 ```
 
 **Room updates use polling.** Every 2 seconds the room calls `GET /api/meetings/{code}/state`. One call returns the meeting, the participant list, new chat messages and your own status. The same call is also a heartbeat: anyone who stops calling for 30 seconds (closed tab, lost network) is marked as left. When the last person leaves, the meeting moves to "ended" and shows up in Recent.
+
+**Audio and video use WebRTC** (`frontend/lib/webrtc.ts`). Every pair of people in a meeting gets a direct browser-to-browser connection (a "mesh"). The server never touches the media; it only passes two short notes between the browsers so they can find each other:
+
+1. The person with the **lower participant id** creates an **offer**: what it will send (mic, camera, screen) and its network addresses (found with Google's public STUN server). It posts it to `POST /api/participants/{id}/signals`.
+2. The other person collects it from `GET /api/participants/{id}/signals` (checked every 0.7 s while connecting, 2.5 s otherwise), creates an **answer** and posts it back.
+3. The browsers connect directly and media flows.
+
+Each connection has three fixed slots: mic, camera and screen. Muting disables the mic track; camera off, switching devices and screen sharing just swap the track in a slot (`replaceTrack`), so nothing has to be renegotiated. A connection that gets no answer in 10 s, or breaks, is started again automatically. Using the lower id as the one who offers means two people never offer to each other at the same time. Notes are deleted once delivered (or after 2 minutes).
 
 **No duplicate people.** Leaving the room page any way (the Leave button, the browser's Back button, a link) tells the server you left. Each browser tab also sends a random `client_id` when it joins; if the same tab joins again (after Back, a refresh or a crash), the server replaces its old entry instead of adding a second one, and keeps the host role if it had it.
 
@@ -142,6 +151,8 @@ erDiagram
     users |o--o{ meeting_notes : writes
     participants |o--o{ meeting_notes : "writes (guests)"
     meetings ||--o{ reactions : has
+    meetings ||--o{ signals : has
+    participants ||--o{ signals : "sends / receives"
     participants ||--o{ reactions : sends
 
     users {
@@ -179,6 +190,7 @@ erDiagram
         bool is_muted
         bool is_video_on
         bool is_hand_raised
+        bool is_sharing_screen
         string client_id "per browser tab, for rejoin"
         string token_hash "hash of the participant key"
         datetime joined_at
@@ -277,11 +289,21 @@ erDiagram
         string emoji
         datetime created_at
     }
+    signals {
+        int id PK
+        int meeting_id FK
+        int from_participant_id FK
+        int to_participant_id FK
+        text payload "WebRTC offer or answer (JSON)"
+        datetime created_at
+    }
 ```
 
 Design choices:
 - **`meeting_code` vs `id`.** `id` is the internal key used in joins. `meeting_code` is the public 10 digit number people type. It is unique and indexed. Keeping them separate means the public ID can follow its own format without touching the keys.
 - **`participants.user_id` can be NULL.** Guests join with only a display name, exactly like Zoom. The display name is stored on the participant row because the same user can use a different name in each meeting.
+- **`signals` is a short-lived mailbox, not history.** WebRTC offers and answers wait here until the other browser picks them up, then they are deleted. Indexed on `(to_participant_id, id)` so each check is one fast lookup. Only people in the same meeting can send to each other, and each note is capped at 64 KB.
+- **`participants.is_sharing_screen`** tells everyone whose screen to show. The picture itself goes over WebRTC. Host rules apply: when the host turns screen sharing off, the server clears this flag for everyone but the host.
 - **One participant row per join.** This keeps a history of who was in each meeting, which is how "Recent meetings" and the meeting duration work.
 - **`status` columns instead of deleting rows.** Leaving or being removed keeps the row, so history and chat authors stay intact.
 - **Chat links to the participant, not the user.** Guests can chat too, and the message shows the name used in that meeting.
@@ -335,7 +357,9 @@ Interactive docs are at `/docs` on the backend.
 | POST | `/api/meetings/{code}/messages` | Send a chat message |
 | POST | `/api/meetings/{code}/mute-all` | Host: mute everyone else |
 | POST | `/api/meetings/{code}/end` | Host: end for everyone |
-| PATCH | `/api/participants/{id}` | Update your own mic, camera, raised hand or name (host rules apply) |
+| PATCH | `/api/participants/{id}` | Update your own mic, camera, raised hand, screen sharing or name (host rules apply) |
+| POST | `/api/participants/{id}/signals` | WebRTC: leave an offer or answer for another participant |
+| GET | `/api/participants/{id}/signals` | WebRTC: collect (and delete) the notes left for you |
 | POST | `/api/participants/{id}/leave` | Leave the meeting |
 | POST | `/api/participants/{id}/mute` | Host: mute one person |
 | POST | `/api/participants/{id}/remove` | Host: remove one person (from the meeting or waiting room) |
@@ -424,8 +448,10 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 - **Email and password sign in.** Any email can sign up. Emails are not verified with a code, and there is no "forgot password" yet: both need an email sending service (see "What I would add next").
 - **The sign in token is kept in `localStorage`.** The API is on a different domain from the site, so a cookie would need cross-site cookie setup. The trade-off is that a cross-site scripting bug could read the token; React escapes all output, and sessions expire after 30 days.
 - **Who is host:** the signed in owner of the meeting. People who join with an invite link, with or without an account, join as attendees. The host can hand over the role, and the owner gets it back if they rejoin.
-- **Video between people is not streamed.** Each person sees their own real camera. Other people appear as name tiles with live mic, camera and hand status. Real peer to peer video would need WebRTC plus a signalling server; the room is built so this could be added later without changing the database.
-- **Screen sharing is local.** You see your own shared screen; others don't (that needs WebRTC). Reactions, raised hands and every host rule are shared through the server.
+- **Mesh WebRTC, sized for small meetings.** Each person sends their video to every other person, so upload grows with the meeting size. That is fine for a handful of people; large meetings would need a media server (an SFU such as LiveKit or mediasoup) that receives each stream once and forwards it.
+- **STUN only by default.** Most home and office networks connect fine. Some strict networks (certain corporate firewalls, some mobile carriers) need a TURN relay server. Add one with `NEXT_PUBLIC_ICE_SERVERS` on Vercel, for example `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:your.turn.server:3478","username":"...","credential":"..."}]`. Without TURN, people on such networks still see everyone's name tile, chat and reactions, but not their video.
+- **Signalling uses polling**, like the rest of the room. Connecting takes about 1 to 3 seconds. WebSockets would make it near instant.
+- **Browsers may block sound until you click.** If that happens, a "Click to hear the other participants" bar appears.
 - **Notes are private.** Only the person who wrote them can read them.
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
@@ -440,7 +466,7 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 
 ## What I would add next
 
-- WebRTC video, audio and screen sharing between participants (with a TURN server)
+- A TURN server for strict networks, and an SFU media server for large meetings
 - Virtual backgrounds and background blur (MediaPipe selfie segmentation)
 - WebSockets for instant updates
 - Email verification codes and "forgot password" (needs an email service such as Resend or SendGrid)

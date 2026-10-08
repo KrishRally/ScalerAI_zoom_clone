@@ -26,6 +26,30 @@ def update_self(
     return participant_service.update_participant(db, participant, data)
 
 
+@router.post("/{participant_id}/signals", status_code=status.HTTP_204_NO_CONTENT)
+def send_signal(
+    participant_id: int,
+    data: schemas.SignalIn,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    """WebRTC: leave a connection note (offer or answer) for another participant."""
+    sender = participant_service.authenticate(db, participant_id, token)
+    participant_service.send_signal(db, sender, data)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{participant_id}/signals", response_model=list[schemas.SignalOut])
+def take_signals(
+    participant_id: int,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    """WebRTC: collect connection notes left for this participant."""
+    me = participant_service.authenticate(db, participant_id, token)
+    return participant_service.take_signals(db, me)
+
+
 @router.post("/{participant_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
 def leave(
     participant_id: int,

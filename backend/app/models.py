@@ -147,6 +147,8 @@ class Participant(Base):
     is_muted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_video_on: Mapped[bool] = mapped_column(Boolean, default=True)
     is_hand_raised: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True while this person shares their screen (the picture itself goes over WebRTC).
+    is_sharing_screen: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # A random id each browser tab keeps, so rejoining from the same tab
     # replaces the old entry instead of showing the person twice.
     client_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -162,6 +164,27 @@ class Participant(Base):
     user: Mapped[User | None] = relationship()
 
     __table_args__ = (Index("ix_participants_meeting_status", "meeting_id", "status"),)
+
+
+class Signal(Base):
+    """A WebRTC connection note passed from one participant's browser to another's.
+
+    Browsers can't find each other on their own, so they leave an "offer" or
+    "answer" (which says how to reach them and what media they send) here, and
+    the other side picks it up on its next check. Once delivered, it is deleted.
+    The audio and video themselves go straight between the browsers.
+    """
+
+    __tablename__ = "signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"))
+    from_participant_id: Mapped[int] = mapped_column(ForeignKey("participants.id", ondelete="CASCADE"))
+    to_participant_id: Mapped[int] = mapped_column(ForeignKey("participants.id", ondelete="CASCADE"))
+    payload: Mapped[str] = mapped_column(Text)  # JSON, opaque to the server
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_signals_to_id", "to_participant_id", "id"),)
 
 
 class ChatMessage(Base):

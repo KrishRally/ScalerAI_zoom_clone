@@ -7,8 +7,10 @@ import type { Participant } from "@/lib/types";
 interface Props {
   participant: Participant;
   isMe: boolean;
-  /** Only our own tile has a real stream (no peer to peer video in this version). */
+  /** Our camera, or theirs arriving over WebRTC. */
   stream?: MediaStream | null;
+  /** Still setting up the connection to this person. */
+  connecting?: boolean;
   speaking?: boolean;
   /** A floating emoji. The id changes for every new reaction so the animation restarts. */
   reaction?: { emoji: string; id: number } | null;
@@ -24,13 +26,14 @@ export default function VideoTile({
   isMe,
   stream,
   speaking,
+  connecting,
   reaction,
   width,
   height,
   compact,
   className = "",
 }: Props) {
-  const hasVideo = isMe && participant.is_video_on && !!stream?.getVideoTracks().length;
+  const hasVideo = participant.is_video_on && !!stream?.getVideoTracks().length;
 
   return (
     <div
@@ -38,7 +41,8 @@ export default function VideoTile({
       style={width ? { width, height } : undefined}
     >
       {hasVideo ? (
-        <VideoPreview stream={stream!} />
+        // Only our own picture is mirrored, like a mirror. Others see you the right way round.
+        <VideoPreview stream={stream!} mirrored={isMe} />
       ) : (
         // Zoom shows the person's name in large text when their video is off.
         <div className="flex h-full w-full items-center justify-center px-3">
@@ -50,6 +54,10 @@ export default function VideoTile({
             {participant.display_name}
           </span>
         </div>
+      )}
+
+      {connecting && (
+        <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-[#D0D0D0]">Connecting...</span>
       )}
 
       {/* Green border while talking */}

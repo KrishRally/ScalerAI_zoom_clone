@@ -4,6 +4,7 @@ Keeping these separate from the database models means we control exactly
 which fields go over the wire.
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
@@ -223,8 +224,28 @@ class ParticipantOut(ORMModel):
     is_muted: bool
     is_video_on: bool
     is_hand_raised: bool
+    is_sharing_screen: bool | None = False
     joined_at: UTCOutput
     left_at: UTCOutput | None
+
+
+class SignalIn(BaseModel):
+    to: int
+    # An SDP offer or answer. A few kilobytes; the cap stops anyone storing junk.
+    data: dict = Field(...)
+
+    @field_validator("data")
+    @classmethod
+    def _small(cls, value: dict) -> dict:
+        if len(json.dumps(value)) > 64_000:
+            raise ValueError("Signal is too large")
+        return value
+
+
+class SignalOut(BaseModel):
+    id: int
+    from_id: int
+    data: dict
 
 
 class JoinResult(ParticipantOut):
@@ -237,6 +258,7 @@ class ParticipantUpdate(BaseModel):
     is_muted: bool | None = None
     is_video_on: bool | None = None
     is_hand_raised: bool | None = None
+    is_sharing_screen: bool | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("display_name")

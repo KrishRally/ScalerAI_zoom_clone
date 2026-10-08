@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LayoutGrid, Lock, ShieldCheck, User as UserIcon, WifiOff } from "lucide-react";
+import { LayoutGrid, Lock, ShieldCheck, User as UserIcon, Volume2, WifiOff } from "lucide-react";
 import AssignHostModal from "@/components/room/AssignHostModal";
 import ChatPanel from "@/components/room/ChatPanel";
 import ControlBar, { type Panel } from "@/components/room/ControlBar";
@@ -11,6 +11,7 @@ import MeetingInfo from "@/components/room/MeetingInfo";
 import MeetingStage, { type ViewMode } from "@/components/room/MeetingStage";
 import NotesPanel from "@/components/room/NotesPanel";
 import ParticipantsPanel from "@/components/room/ParticipantsPanel";
+import RemoteAudio, { resumeRemoteAudio } from "@/components/room/RemoteAudio";
 import RenameModal from "@/components/room/RenameModal";
 import RoomEndScreen from "@/components/room/RoomEndScreen";
 import WaitingRoomScreen from "@/components/room/WaitingRoomScreen";
@@ -20,6 +21,8 @@ import { useCopy } from "@/hooks/useCopy";
 import { useLocalMedia } from "@/hooks/useLocalMedia";
 import { useMeetingRoom, type MeetingRoom } from "@/hooks/useMeetingRoom";
 import { useNow } from "@/hooks/useNow";
+import { usePeerMesh } from "@/hooks/usePeerMesh";
+import { useSpeaking } from "@/hooks/useSpeaking";
 import { api } from "@/lib/api";
 import { elapsed, invitationText } from "@/lib/format";
 import { clearMeetingSession, loadMeetingSession, type MeetingSession } from "@/lib/session";
@@ -161,9 +164,12 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
   const screenRef = useRef<MediaStream | null>(null);
   screenRef.current = screen;
   const stopShare = useCallback(() => {
+    const wasSharing = !!screenRef.current;
     screenRef.current?.getTracks().forEach((t) => t.stop());
     setScreen(null);
-  }, []);
+    // Tell everyone we stopped, so their view goes back to the videos.
+    if (wasSharing) api.updateSelf(pid, { is_sharing_screen: false }).catch(() => {});
+  }, [pid]);
   useEffect(() => {
     if (blocked.share && screenRef.current) {
       stopShare();
@@ -187,10 +193,29 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
 
   // Our own tile uses the live device state so it never lags behind the server.
   const people: Participant[] = useMemo(
-    () => participants.map((p) => (p.id === pid ? { ...p, is_muted: !audioOn, is_video_on: videoOn } : p)),
-    [participants, pid, audioOn, videoOn],
+    () =>
+      participants.map((p) =>
+        p.id === pid ? { ...p, is_muted: !audioOn, is_video_on: videoOn, is_sharing_screen: !!screen } : p,
+      ),
+    [participants, pid, audioOn, videoOn, screen],
   );
   const others = people.filter((p) => p.id !== pid);
+
+  // ---- Real audio and video with everyone else (WebRTC) ----
+  const remote = usePeerMesh(pid, others.map((p) => p.id), media.stream, screen);
+  const remoteVoices = useMemo(
+    () => Object.fromEntries(others.filter((p) => !p.is_muted).map((p) => [p.id, remote[p.id]?.audio])),
+    [others, remote],
+  );
+  const remoteSpeaking = useSpeaking(remoteVoices);
+  const speaking = useMemo(() => {
+    const all = new Set(remoteSpeaking);
+    if (media.speaking) all.add(pid);
+    return all;
+  }, [remoteSpeaking, media.speaking, pid]);
+  // Browsers may block sound until the page is clicked.
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const onAudioBlocked = useCallback(() => setAudioBlocked(true), []);
 
   // ---- Actions ----
   const fail = (e: unknown) => toast((e as Error).message, "error");
@@ -212,10 +237,12 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
       // The browser's own "Stop sharing" button ends the track.
-      s.getVideoTracks()[0].addEventListener("ended", () => setScreen(null));
+      s.getVideoTracks()[0].addEventListener("ended", stopShare);
+      await api.updateSelf(pid, { is_sharing_screen: true });
       setScreen(s);
-    } catch {
-      // The user closed the picker.
+    } catch (e) {
+      // The user closed the picker, or the host has just turned sharing off.
+      if (e instanceof Error && e.message.includes("host")) toast(e.message, "info");
     }
   };
 
@@ -397,6 +424,17 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
           <WifiOff className="h-3.5 w-3.5" /> Connection lost. Reconnecting...
         </div>
       )}
+      {audioBlocked && (
+        <button
+          onClick={() => {
+            resumeRemoteAudio();
+            setAudioBlocked(false);
+          }}
+          className="flex shrink-0 items-center justify-center gap-2 bg-zoom-blue py-1.5 text-xs font-semibold text-white hover:bg-zoom-blue-hover"
+        >
+          <Volume2 className="h-4 w-4" /> Click to hear the other participants
+        </button>
+      )}
       {media.error && !room.connectionLost && (
         <div className="shrink-0 bg-[#2B2B2B] py-1 text-center text-xs text-[#D0D0D0]">{media.error}</div>
       )}
@@ -408,7 +446,8 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
             participants={people}
             meId={pid}
             myStream={media.stream}
-            speaking={media.speaking}
+            remote={remote}
+            speaking={speaking}
             reactions={room.reactions}
             view={view}
             screen={screen}
@@ -468,6 +507,12 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
         onLeave={leave}
         onEndForAll={endForAll}
       />
+
+      {/* Everyone else's voices */}
+      {others.map((p) => {
+        const voice = remote[p.id]?.audio;
+        return voice ? <RemoteAudio key={p.id} stream={voice} onBlocked={onAudioBlocked} /> : null;
+      })}
 
       <RenameModal participant={renaming} isSelf={renaming?.id === pid} onClose={() => setRenaming(null)} onSave={rename} />
       <AssignHostModal open={assignOpen} candidates={others} onClose={() => setAssignOpen(false)} onAssign={assignAndLeave} />
