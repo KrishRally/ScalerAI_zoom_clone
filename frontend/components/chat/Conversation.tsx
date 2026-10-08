@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Hash, LogOut, SendHorizontal, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Hash, SendHorizontal, Star } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
@@ -15,20 +15,19 @@ const GROUP_MS = 5 * 60_000;
 interface Props {
   channel: Channel;
   meId: number;
+  starred: boolean;
+  onToggleStar: () => void;
   onBack: () => void;
-  onAddPeople: () => void;
-  onLeft: () => void;
   onActivity: () => void;
 }
 
 /** The open conversation: header, messages and the message box. */
-export default function Conversation({ channel, meId, onBack, onAddPeople, onLeft, onActivity }: Props) {
+export default function Conversation({ channel, meId, starred, onToggleStar, onBack, onActivity }: Props) {
   const toast = useToast();
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [showMembers, setShowMembers] = useState(false);
   const lastId = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -47,7 +46,6 @@ export default function Conversation({ channel, meId, onBack, onAddPeople, onLef
     lastId.current = 0;
     setMessages([]);
     setLoading(true);
-    setShowMembers(false);
 
     const load = async () => {
       try {
@@ -94,23 +92,13 @@ export default function Conversation({ channel, meId, onBack, onAddPeople, onLef
     }
   };
 
-  const leave = async () => {
-    if (!window.confirm(`Leave #${channel.name}?`)) return;
-    try {
-      await api.leaveChannel(channel.id);
-      onLeft();
-    } catch (e) {
-      toast((e as Error).message, "error");
-    }
-  };
-
   const other = channel.is_direct ? channel.members.find((m) => m.id !== meId) ?? channel.members[0] : null;
   const placeholder = channel.is_direct ? `Message ${channel.name}` : `Message #${channel.name}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="relative flex items-center gap-3 border-b border-zoom-border px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-zoom-border px-4 py-3">
         <button onClick={onBack} className="rounded p-1 text-zoom-muted hover:bg-zoom-surface md:hidden" aria-label="Back to conversations">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -127,27 +115,15 @@ export default function Conversation({ channel, meId, onBack, onAddPeople, onLef
             {channel.is_direct ? other?.email : `${channel.members.length} member${channel.members.length === 1 ? "" : "s"}`}
           </p>
         </div>
-        {!channel.is_direct && (
-          <div className="flex items-center gap-1">
-            <IconButton label="Members" onClick={() => setShowMembers((s) => !s)}><Users className="h-4 w-4" /></IconButton>
-            <IconButton label="Add people" onClick={onAddPeople}><UserPlus className="h-4 w-4" /></IconButton>
-            {!channel.is_default && <IconButton label="Leave channel" onClick={leave}><LogOut className="h-4 w-4" /></IconButton>}
-          </div>
-        )}
-        {showMembers && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setShowMembers(false)} />
-            <div className="absolute right-4 top-14 z-20 max-h-80 w-64 animate-fade-up overflow-y-auto rounded-xl border border-zoom-border bg-white py-2 shadow-pop">
-              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-zoom-muted">Members</p>
-              {channel.members.map((m) => (
-                <div key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-                  <Avatar name={m.name} color={m.avatar_color} size={24} />
-                  <span className="truncate">{m.name}{m.id === meId && <span className="text-zoom-muted"> (you)</span>}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        <button
+          onClick={onToggleStar}
+          className={`rounded-lg p-2 hover:bg-zoom-surface ${starred ? "text-amber-400" : "text-zoom-muted hover:text-zoom-ink"}`}
+          aria-label={starred ? "Unstar" : "Star"}
+          aria-pressed={starred}
+          title={starred ? "Unstar" : "Star"}
+        >
+          <Star className="h-5 w-5" fill={starred ? "currentColor" : "none"} />
+        </button>
       </div>
 
       {/* Messages */}
@@ -234,13 +210,5 @@ function DayDivider({ date }: { date: Date }) {
       {label}
       <span className="h-px flex-1 bg-zoom-border" />
     </div>
-  );
-}
-
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className="rounded-lg p-2 text-zoom-muted hover:bg-zoom-surface hover:text-zoom-ink" aria-label={label} title={label}>
-      {children}
-    </button>
   );
 }

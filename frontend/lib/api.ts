@@ -118,10 +118,6 @@ export const api = {
   createChannel: (name: string, memberIds: number[]) =>
     post<Channel>("/api/chat/channels", { name, member_ids: memberIds }),
   openDirect: (userId: number) => post<Channel>("/api/chat/direct", { user_id: userId }),
-  addChannelMembers: (channelId: number, userIds: number[]) =>
-    post<Channel>(`/api/chat/channels/${channelId}/members`, { user_ids: userIds }),
-  leaveChannel: (channelId: number) =>
-    request<void>(`/api/chat/channels/${channelId}/members/me`, { method: "DELETE" }),
   channelMessages: (channelId: number, afterId = 0) =>
     request<ChannelMessage[]>(`/api/chat/channels/${channelId}/messages?after_id=${afterId}`),
   sendChannelMessage: (channelId: number, content: string) =>

@@ -428,10 +428,6 @@ class ChannelOut(BaseModel):
     last_message: ChannelMessageOut | None
 
 
-class ChannelMembersAdd(BaseModel):
-    user_ids: list[int] = Field(min_length=1, max_length=200)
-
-
 class UnreadOut(BaseModel):
     unread: int
 

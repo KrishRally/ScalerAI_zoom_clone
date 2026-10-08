@@ -2,7 +2,6 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MessageSquare } from "lucide-react";
 import TopNav from "@/components/layout/TopNav";
 import ChannelList from "@/components/chat/ChannelList";
 import Conversation from "@/components/chat/Conversation";
@@ -12,21 +11,53 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import Spinner from "@/components/ui/Spinner";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
+import { hasTeamChat } from "@/lib/auth";
 import type { Channel } from "@/lib/types";
 
 // The list is refreshed this often for new messages and unread counts.
 const LIST_POLL_MS = 4000;
+const STARRED_KEY = "zoom-chat-starred";
 
-/** Zoom's Team Chat: conversations on the left, the open one on the right. */
+/** Starred chats, remembered in this browser only. */
+function useStarred() {
+  const [starred, setStarred] = useState<number[]>([]);
+  useEffect(() => {
+    try {
+      setStarred(JSON.parse(localStorage.getItem(STARRED_KEY) || "[]"));
+    } catch {
+      // Storage blocked or bad data: start with nothing starred.
+    }
+  }, []);
+  const toggle = (id: number) =>
+    setStarred((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem(STARRED_KEY, JSON.stringify(next));
+      } catch {
+        // Not saved, but still works for this visit.
+      }
+      return next;
+    });
+  return { starred, toggle };
+}
+
+/** Zoom's Chat: chats on the left, the open one (or a "start chatting" picture) on the right. */
 function ChatView() {
   const { user } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
   const activeId = params.get("c") ? Number(params.get("c")) : null;
+  const allowed = hasTeamChat(user?.email);
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<NewChatMode | null>(null);
+  const { starred, toggle } = useStarred();
+
+  // Team Chat is only on the demo account. Everyone else goes back home.
+  useEffect(() => {
+    if (user && !allowed) router.replace("/");
+  }, [user, allowed, router]);
 
   const reload = useCallback(async () => {
     try {
@@ -38,24 +69,22 @@ function ChatView() {
   }, []);
 
   useEffect(() => {
+    if (!allowed) return;
     reload();
     const id = setInterval(reload, LIST_POLL_MS);
     return () => clearInterval(id);
-  }, [reload]);
+  }, [allowed, reload]);
 
   const select = (id: number | null) => router.replace(id ? `/chat?c=${id}` : "/chat");
 
-  // On wide screens, open the most recent conversation if none is picked.
-  useEffect(() => {
-    if (!activeId && channels?.length && window.matchMedia("(min-width: 768px)").matches) {
-      select(channels[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, channels]);
+  const markAllRead = async () => {
+    await Promise.all((channels ?? []).filter((c) => c.unread_count > 0).map((c) => api.markChannelRead(c.id).catch(() => {})));
+    reload();
+  };
 
   const active = channels?.find((c) => c.id === activeId) ?? null;
 
-  if (!user) return null;
+  if (!user || !allowed) return null;
 
   return (
     <div className="flex h-[100dvh] flex-col bg-white">
@@ -66,14 +95,16 @@ function ChatView() {
         <div className="flex flex-1 items-center justify-center text-zoom-blue"><Spinner className="h-8 w-8" /></div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          <aside className={`w-full border-r border-zoom-border md:block md:w-80 lg:w-96 ${active ? "hidden" : "block"}`}>
+          <aside className={`w-full border-r border-zoom-border md:block md:w-80 lg:w-[22rem] ${active ? "hidden" : "block"}`}>
             <ChannelList
               channels={channels}
               activeId={activeId}
               meId={user.id}
+              meName={user.name}
+              starred={starred}
               onSelect={select}
-              onNewChat={() => setDialog("direct")}
-              onNewChannel={() => setDialog("channel")}
+              onNew={setDialog}
+              onMarkAllRead={markAllRead}
             />
           </aside>
           <section className={`min-w-0 flex-1 md:block ${active ? "block" : "hidden"}`}>
@@ -81,19 +112,15 @@ function ChatView() {
               <Conversation
                 channel={active}
                 meId={user.id}
+                starred={starred.includes(active.id)}
+                onToggleStar={() => toggle(active.id)}
                 onBack={() => select(null)}
-                onAddPeople={() => setDialog("add-members")}
-                onLeft={() => {
-                  select(null);
-                  reload();
-                }}
                 onActivity={reload}
               />
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-zoom-muted">
-                <MessageSquare className="h-12 w-12 text-zoom-border" />
-                <p className="text-sm">Pick a conversation or start a new chat.</p>
-                <button className="btn-primary" onClick={() => setDialog("direct")}>New chat</button>
+              <div className="flex h-full flex-col items-center justify-center gap-6 px-6 text-center">
+                <ChatBubbles />
+                <p className="max-w-sm text-zoom-text">Start chatting by clicking or creating a chat in the left sidebar.</p>
               </div>
             )}
           </section>
@@ -102,7 +129,6 @@ function ChatView() {
 
       <NewChatDialog
         mode={dialog}
-        channel={active}
         meId={user.id}
         onClose={() => setDialog(null)}
         onDone={(c) => {
@@ -112,6 +138,19 @@ function ChatView() {
         }}
       />
     </div>
+  );
+}
+
+/** Two light blue speech bubbles, like the empty Chat screen in Zoom. */
+function ChatBubbles() {
+  return (
+    <svg width="220" height="170" viewBox="0 0 220 170" aria-hidden="true">
+      <path d="M118 18h70a22 22 0 0 1 22 22v40a22 22 0 0 1-22 22h-6v20l-22-20h-42a22 22 0 0 1-22-22V40a22 22 0 0 1 22-22z" fill="#C9DBFF" />
+      <path d="M32 52h96a24 24 0 0 1 24 24v44a24 24 0 0 1-24 24H74l-26 22v-22H32a24 24 0 0 1-24-24V76a24 24 0 0 1 24-24z" fill="#8FB4FF" />
+      <circle cx="54" cy="98" r="8" fill="#fff" />
+      <circle cx="80" cy="98" r="8" fill="#fff" />
+      <circle cx="106" cy="98" r="8" fill="#fff" />
+    </svg>
   );
 }
 

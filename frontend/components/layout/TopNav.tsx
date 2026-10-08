@@ -19,6 +19,7 @@ import ZoomLogo from "@/components/ui/ZoomLogo";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+import { hasTeamChat } from "@/lib/auth";
 
 const TABS = [
   { href: "/", label: "Home", icon: Home },
@@ -47,8 +48,11 @@ export default function TopNav() {
   const router = useRouter();
   const toast = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Team Chat is only on the demo account.
+  const showChat = hasTeamChat(user?.email);
+  const tabs = showChat ? TABS : TABS.filter((t) => t.href !== "/chat");
   // The chat page shows its own counts, so don't poll from here while on it.
-  const chatUnread = useChatUnread(!!user && !pathname.startsWith("/chat"));
+  const chatUnread = useChatUnread(showChat && !pathname.startsWith("/chat"));
 
   const comingSoon = (label: string) => toast(`${label} is not part of this demo`, "info");
 
@@ -60,7 +64,7 @@ export default function TopNav() {
         </Link>
 
         <nav className="no-scrollbar ml-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:ml-6 md:flex-none">
-          {TABS.map(({ href, label, icon: Icon }) => {
+          {tabs.map(({ href, label, icon: Icon }) => {
             const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
             const badge = href === "/chat" && chatUnread > 0 && !active;
             return (

@@ -25,7 +25,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 - **Settings page:** change your name and profile colour, change your password (signs out your other devices), meeting defaults (start with video, join muted, always show preview, waiting room and mute on entry for new meetings), and test and pick your microphone and camera.
 
 **Team Chat, Calendar and Docs (bonus)**
-- **Team Chat:** a company-wide **General** channel everyone joins, channels you create (add people, leave), and **direct messages** with anyone who has an account (search by name or email). Unread counts per conversation, an unread badge on the Team Chat tab, messages grouped by person and day, new messages appear within a few seconds.
+- **Team Chat (demo account only):** laid out like Zoom's desktop Chat. A "Chat" header with settings and a round blue **+** (New chat, New channel), filter pills (**All**, **@** mentions, unread, and **...** for Direct messages or Channels), and folding sections: **Chats & Channels**, **Shared spaces** and **Starred** (stars are saved in your browser). With nothing open, the right side shows the "Start chatting" picture. Unread counts per chat, an unread badge on the tab, and new messages appear within a few seconds. Team Chat is only turned on for `alex.johnson@example.com`: other accounts don't see the tab, `/chat` sends them home, and the API answers 403.
 - **Calendar:** Zoom style **week view** (and day view on phones) of your meetings, with Today / previous / next, a current time line, overlapping meetings side by side, and past meetings greyed out. Click a meeting to Start, Copy invitation, Edit or Delete it. **Click an empty time slot to schedule a meeting at that time.**
 - **Docs:** create documents from templates (Blank, Meeting notes, Project plan, 1:1 agenda), edit with **autosave**, see who edited last, search and filter (All / Owned by me / Shared with me), and **share by email** as editor or viewer. Viewers get a read-only page. Edits from others show up while you're not typing.
 
@@ -278,7 +278,6 @@ Interactive docs are at `/docs` on the backend.
 | GET | `/api/chat/unread` | Total unread messages, for the tab badge |
 | GET / POST | `/api/chat/channels/{id}/messages?after_id=` | Read new messages / send one |
 | POST | `/api/chat/channels/{id}/read` | Mark a conversation as read |
-| POST / DELETE | `/api/chat/channels/{id}/members` (`/me`) | Add people / leave a channel |
 | GET / POST | `/api/docs` | Your documents and ones shared with you / create one |
 | GET / PATCH / DELETE | `/api/docs/{id}` | Read / save / delete (owner only) |
 | POST / DELETE | `/api/docs/{id}/members` (`/{user_id}`) | Share by email as editor or viewer / remove access |
@@ -388,6 +387,7 @@ Open http://localhost:3000 and sign in with the demo account (`alex.johnson@exam
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
 - **Placeholders:** the top search box and the notifications bell show a "not part of this demo" message.
+- **Team Chat is a demo-only feature.** Only the seeded demo account can use it, so reviewers see a full chat with seeded teammates while new accounts keep a simpler app. The rule lives in the API (`require_chat_access`), not just the UI.
 - **Team Chat and Docs update by polling** (every few seconds), like the meeting room. Two people typing in the same document at the same moment: the last save wins; edits from others appear when you pause typing.
 - Times use the browser's time zone.
 - The Zoom wordmark is drawn as styled text, not the official logo file.

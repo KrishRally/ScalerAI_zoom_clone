@@ -12,7 +12,6 @@ from app.models import AuthSession, User, UserSettings, utcnow
 from app.services.codes import generate_personal_meeting_id
 from app.services.errors import BadRequest, Conflict, Unauthorized
 from app.services.security import hash_password, hash_token, new_token, verify_password
-from app.services.team_chat import ensure_default_channel
 
 AVATAR_COLORS = ["#0E71EB", "#E8710A", "#1E8E3E", "#A142F4", "#D93025", "#12A4AF", "#C2185B"]
 
@@ -59,8 +58,6 @@ def sign_up(db: Session, data: schemas.SignUp) -> schemas.AuthResult:
     db.add(user)
     db.commit()
     db.refresh(user)
-    # New people join the company-wide "General" chat channel straight away.
-    ensure_default_channel(db, user)
     return schemas.AuthResult(token=_start_session(db, user), user=schemas.UserOut.model_validate(user))
 
 

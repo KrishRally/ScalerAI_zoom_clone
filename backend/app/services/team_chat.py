@@ -1,13 +1,21 @@
-"""Team Chat: channels, direct messages, unread counts."""
+"""Team Chat: channels, direct messages, unread counts. Only the demo account has it."""
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.config import DEMO_EMAIL
 from app.models import ChannelMember, ChannelMessage, ChatChannel, User
 from app.services.errors import BadRequest, Forbidden, NotFound
 
 DEFAULT_CHANNEL_NAME = "General"
+
+
+def require_chat_access(user: User) -> User:
+    """Team Chat is a demo feature, so it is only turned on for the demo account."""
+    if user.email.lower() != DEMO_EMAIL:
+        raise Forbidden("Team Chat is only available on the demo account")
+    return user
 
 
 def person(user: User) -> schemas.PersonOut:
@@ -152,30 +160,6 @@ def open_direct_message(db: Session, me: User, other_id: int) -> schemas.Channel
     db.commit()
     db.refresh(channel)
     return _channel_out(db, channel, me, 0)
-
-
-def add_members(db: Session, me: User, channel_id: int, data: schemas.ChannelMembersAdd) -> schemas.ChannelOut:
-    member = _membership(db, channel_id, me)
-    channel = member.channel
-    if channel.is_direct:
-        raise BadRequest("You can't add people to a direct message. Start a channel instead.")
-    existing = {m.user_id for m in channel.members}
-    for user in _users_by_ids(db, data.user_ids):
-        if user.id not in existing:
-            channel.members.append(ChannelMember(user_id=user.id))
-    db.commit()
-    db.refresh(channel)
-    return _channel_out(db, channel, me, member.last_read_message_id)
-
-
-def leave_channel(db: Session, me: User, channel_id: int) -> None:
-    member = _membership(db, channel_id, me)
-    if member.channel.is_default:
-        raise BadRequest(f"Everyone stays in {DEFAULT_CHANNEL_NAME}")
-    if member.channel.is_direct:
-        raise BadRequest("You can't leave a direct message")
-    db.delete(member)
-    db.commit()
 
 
 def list_messages(

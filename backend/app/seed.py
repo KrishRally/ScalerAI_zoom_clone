@@ -14,7 +14,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import DEMO_PASSWORD
+from app.config import DEMO_EMAIL, DEMO_PASSWORD
 from app.models import (
     ChannelMember,
     ChannelMessage,
@@ -38,7 +38,7 @@ from app.services.codes import (
 )
 from app.services.security import hash_password
 
-DEFAULT_USER_EMAIL = "alex.johnson@example.com"
+DEFAULT_USER_EMAIL = DEMO_EMAIL
 DEFAULT_USER_NAME = os.getenv("DEFAULT_USER_NAME", "Alex Johnson")
 
 _OTHER_USERS = [

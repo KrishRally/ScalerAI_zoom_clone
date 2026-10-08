@@ -29,5 +29,8 @@ PASSWORD_HASH_ITERATIONS = int(os.getenv("PASSWORD_HASH_ITERATIONS", "600000"))
 # How long a sign in lasts before the user must sign in again.
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "30"))
 
+# The seeded demo account. Team Chat is only turned on for this account.
+DEMO_EMAIL = "alex.johnson@example.com"
+
 # Password for the seeded demo account, so reviewers can sign in straight away.
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "zoomdemo123")

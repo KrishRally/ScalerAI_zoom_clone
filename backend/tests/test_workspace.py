@@ -22,68 +22,50 @@ def new_user(client):
 # ---------- Team Chat ----------
 
 
-def test_everyone_is_in_general(client, auth, new_user):
+def _seeded_teammate(client, auth, name):
+    return client.get("/api/users/search", params={"q": name}, headers=auth).json()[0]
+
+
+def test_demo_account_has_seeded_chats(client, auth):
+    names = {c["name"] for c in client.get("/api/chat/channels", headers=auth).json()}
+    assert {"General", "Dashboard v2", "Priya Sharma"} <= names
+
+
+def test_chat_is_only_for_the_demo_account(client, new_user):
     h, _ = new_user("Newbie")
-    names = [c["name"] for c in client.get("/api/chat/channels", headers=h).json()]
-    assert "General" in names
-    demo_channels = client.get("/api/chat/channels", headers=auth).json()
-    assert {"General", "Dashboard v2"} <= {c["name"] for c in demo_channels}
+    assert client.get("/api/chat/channels", headers=h).status_code == 403
+    assert client.get("/api/chat/unread", headers=h).status_code == 403
+    assert client.post("/api/chat/channels", json={"name": "mine"}, headers=h).status_code == 403
+    assert client.get("/api/chat/channels/1/messages", headers=h).status_code == 403
 
 
-def test_channel_messages_and_unread(client, new_user):
-    ha, a = new_user("Ann")
-    hb, b = new_user("Bob")
-    channel = client.post("/api/chat/channels", json={"name": "#project-x", "member_ids": [b["id"]]}, headers=ha).json()
+def test_channel_messages_and_read(client, auth):
+    daniel = _seeded_teammate(client, auth, "daniel")
+    channel = client.post(
+        "/api/chat/channels", json={"name": "#project-x", "member_ids": [daniel["id"]]}, headers=auth
+    ).json()
     assert channel["name"] == "project-x"
+    assert {m["name"] for m in channel["members"]} == {"Alex Johnson", "Daniel Kim"}
     cid = channel["id"]
 
-    client.post(f"/api/chat/channels/{cid}/messages", json={"content": "Hello Bob"}, headers=ha)
-    bob_view = next(c for c in client.get("/api/chat/channels", headers=hb).json() if c["id"] == cid)
-    assert bob_view["unread_count"] == 1
-    assert client.get("/api/chat/unread", headers=hb).json()["unread"] >= 1
-    # Your own messages are never unread.
-    ann_view = next(c for c in client.get("/api/chat/channels", headers=ha).json() if c["id"] == cid)
-    assert ann_view["unread_count"] == 0
+    first = client.post(f"/api/chat/channels/{cid}/messages", json={"content": "Hello Daniel"}, headers=auth).json()
+    view = next(c for c in client.get("/api/chat/channels", headers=auth).json() if c["id"] == cid)
+    assert view["unread_count"] == 0  # your own messages are never unread
+    assert view["last_message"]["content"] == "Hello Daniel"
 
-    msgs = client.get(f"/api/chat/channels/{cid}/messages", headers=hb).json()
-    assert [m["content"] for m in msgs] == ["Hello Bob"]
-    assert msgs[0]["sender"]["name"] == "Ann"
-    client.post(f"/api/chat/channels/{cid}/read", headers=hb)
-    bob_view = next(c for c in client.get("/api/chat/channels", headers=hb).json() if c["id"] == cid)
-    assert bob_view["unread_count"] == 0
-
-    # Only new messages after an id
-    client.post(f"/api/chat/channels/{cid}/messages", json={"content": "Second"}, headers=ha)
-    newer = client.get(f"/api/chat/channels/{cid}/messages", params={"after_id": msgs[0]["id"]}, headers=hb).json()
+    client.post(f"/api/chat/channels/{cid}/messages", json={"content": "Second"}, headers=auth)
+    newer = client.get(f"/api/chat/channels/{cid}/messages", params={"after_id": first["id"]}, headers=auth).json()
     assert [m["content"] for m in newer] == ["Second"]
+    assert client.post(f"/api/chat/channels/{cid}/read", headers=auth).status_code == 204
+    assert client.get("/api/chat/unread", headers=auth).status_code == 200
 
 
-def test_outsiders_cannot_read_a_channel(client, new_user):
-    ha, _ = new_user("Owner")
-    hc, _ = new_user("Outsider")
-    cid = client.post("/api/chat/channels", json={"name": "secret"}, headers=ha).json()["id"]
-    assert client.get(f"/api/chat/channels/{cid}/messages", headers=hc).status_code == 403
-    assert client.post(f"/api/chat/channels/{cid}/messages", json={"content": "hi"}, headers=hc).status_code == 403
-
-
-def test_direct_messages_are_reused(client, new_user):
-    ha, a = new_user("Dee")
-    hb, b = new_user("Eli")
-    first = client.post("/api/chat/direct", json={"user_id": b["id"]}, headers=ha).json()
-    again = client.post("/api/chat/direct", json={"user_id": a["id"]}, headers=hb).json()
+def test_direct_messages_are_reused(client, auth):
+    sara = _seeded_teammate(client, auth, "sara")
+    first = client.post("/api/chat/direct", json={"user_id": sara["id"]}, headers=auth).json()
+    again = client.post("/api/chat/direct", json={"user_id": sara["id"]}, headers=auth).json()
     assert first["id"] == again["id"] and first["is_direct"]
-    assert first["name"] == "Eli" and again["name"] == "Dee"  # named after the other person
-
-
-def test_add_members_and_leave(client, new_user):
-    ha, _ = new_user("Fay")
-    hb, b = new_user("Gus")
-    cid = client.post("/api/chat/channels", json={"name": "team"}, headers=ha).json()["id"]
-    updated = client.post(f"/api/chat/channels/{cid}/members", json={"user_ids": [b["id"]]}, headers=ha).json()
-    assert "Gus" in [m["name"] for m in updated["members"]]
-    assert client.delete(f"/api/chat/channels/{cid}/members/me", headers=hb).status_code == 204
-    general = next(c for c in client.get("/api/chat/channels", headers=hb).json() if c["is_default"])
-    assert client.delete(f"/api/chat/channels/{general['id']}/members/me", headers=hb).status_code == 400
+    assert first["name"] == "Sara Lopez"  # named after the other person
 
 
 def test_people_search(client, auth):
