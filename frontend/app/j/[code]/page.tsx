@@ -35,7 +35,7 @@ function PreJoin() {
   const { code } = useParams<{ code: string }>();
   const params = useSearchParams();
   const router = useRouter();
-  const { user } = useCurrentUser();
+  const { user, error: userError } = useCurrentUser();
 
   const [meeting, setMeeting] = useState<MeetingLookup | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -110,7 +110,9 @@ function PreJoin() {
     );
   }
 
-  if (!meeting) {
+  // When starting as host, wait for the account so we show "Start", not the guest form.
+  const waitingForUser = params.get("start") === "1" && !user && !userError;
+  if (!meeting || waitingForUser) {
     return (
       <Shell>
         <div className="flex justify-center py-20 text-zoom-blue"><Spinner className="h-8 w-8" /></div>

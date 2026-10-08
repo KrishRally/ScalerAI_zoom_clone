@@ -8,7 +8,6 @@ import {
   CalendarDays,
   FileText,
   Home,
-  LayoutGrid,
   MessageSquare,
   Search,
   Settings,
@@ -26,7 +25,6 @@ const TABS = [
   { href: "/meetings", label: "Meetings", icon: Video },
   { href: null, label: "Calendar", icon: CalendarDays },
   { href: null, label: "Docs", icon: FileText },
-  { href: null, label: "Apps", icon: LayoutGrid },
 ];
 
 export default function TopNav() {
@@ -44,7 +42,7 @@ export default function TopNav() {
           <ZoomLogo />
         </Link>
 
-        <nav className="ml-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:ml-6 md:flex-none">
+        <nav className="no-scrollbar ml-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:ml-6 md:flex-none">
           {TABS.map(({ href, label, icon: Icon }) => {
             const active = href !== null && (href === "/" ? pathname === "/" : pathname.startsWith(href));
             const className = `group relative flex shrink-0 flex-col items-center gap-0.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition-colors lg:px-3 ${

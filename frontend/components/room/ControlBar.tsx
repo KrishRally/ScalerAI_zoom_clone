@@ -4,16 +4,13 @@ import { useState } from "react";
 import {
   Check,
   ChevronUp,
-  Circle,
   Info,
-  LayoutGrid,
   MessageSquare,
   Mic,
   MicOff,
   MonitorUp,
   MoreHorizontal,
   NotebookPen,
-  PenLine,
   Shield,
   Smile,
   Users,
@@ -51,7 +48,6 @@ interface Props {
   onReact: (emoji: string) => void;
   onToggleHand: () => void;
   onShowInfo: () => void;
-  onPlaceholder: (feature: string) => void;
   onLeave: () => void;
   onEndForAll: () => void;
 }
@@ -193,16 +189,13 @@ export default function ControlBar(props: Props) {
         <div className="relative z-20">
           <ToolButton icon={MoreHorizontal} label="More" active={menu === "more"} onClick={() => toggleMenu("more")} />
           {menu === "more" && (
-            <Popover className="right-0 w-64 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
-              <div className="grid grid-cols-3 gap-1">
+            <Popover className="right-0 w-max max-w-[16rem] p-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
+              <div className="flex flex-wrap justify-center gap-1">
                 {/* On small screens some toolbar buttons move in here */}
                 <MoreItem icon={MonitorUp} label="Share" className="sm:hidden" onClick={run(props.onToggleShare)} />
                 {props.isHost && <MoreItem icon={Shield} label="Host tools" className="sm:hidden" onClick={run(() => props.onTogglePanel("host"))} />}
                 <MoreItem icon={NotebookPen} label="Notes" className="md:hidden" onClick={run(() => props.onTogglePanel("notes"))} />
                 <MoreItem icon={Info} label="Meeting info" onClick={run(props.onShowInfo)} />
-                <MoreItem icon={Circle} label="Record" onClick={run(() => props.onPlaceholder("Recording"))} />
-                <MoreItem icon={PenLine} label="Whiteboards" onClick={run(() => props.onPlaceholder("Whiteboards"))} />
-                <MoreItem icon={LayoutGrid} label="Apps" onClick={run(() => props.onPlaceholder("Apps"))} />
               </div>
             </Popover>
           )}
@@ -283,7 +276,7 @@ function MoreItem({
   className?: string;
 }) {
   return (
-    <button onClick={onClick} className={`flex flex-col items-center gap-1.5 rounded-lg px-1 py-2.5 text-xs hover:bg-white/10 ${className}`}>
+    <button onClick={onClick} className={`flex w-[76px] flex-col items-center gap-1.5 rounded-lg px-1 py-2.5 text-xs hover:bg-white/10 ${className}`}>
       <Icon className="h-5 w-5" />
       {label}
     </button>

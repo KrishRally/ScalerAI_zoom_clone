@@ -22,13 +22,14 @@ export function useStartMeeting() {
 
   const startExisting = useCallback(
     async (meetingCode: string, opts: { videoOn?: boolean } = {}) => {
-      if (!user) {
-        toast("Still loading your account, please try again", "error");
-        return;
-      }
       const videoOn = opts.videoOn ?? true;
+      // The preview window looks up the user itself, so it doesn't need to wait for it here.
       if (loadShowPreview()) {
         router.push(`/j/${meetingCode}?start=1${videoOn ? "" : "&video=off"}`);
+        return;
+      }
+      if (!user) {
+        toast("Still loading your account, please try again", "error");
         return;
       }
       setStarting(true);

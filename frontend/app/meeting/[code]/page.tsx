@@ -465,7 +465,6 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
         onReact={react}
         onToggleHand={toggleHand}
         onShowInfo={() => setInfoOpen(true)}
-        onPlaceholder={(feature) => toast(`${feature} is not part of this demo`, "info")}
         onLeave={leave}
         onEndForAll={endForAll}
       />

@@ -19,7 +19,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 ## Features
 
 **Core**
-- **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, Apps, search, settings, profile menu), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
+- **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, search, settings, profile menu), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
 - **Instant meeting:** one click creates a meeting with a unique 10 digit Meeting ID, a passcode and a shareable invite link, then drops you into the room as host. The arrow on the tile lets you choose to start with video off.
 - **Join meeting:** by Meeting ID (with or without spaces) or by pasting the full invite link. The meeting is checked before you continue. You enter a display name and the passcode (filled in automatically from invite links) in the preview window.
 - **Preview window (like Zoom's):** shown before every meeting, for the host too. Live camera with Audio and Video buttons, dropdowns to pick your microphone and camera (remembered for next time), and an "Always show this preview when joining" checkbox.
@@ -34,7 +34,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 - Participants panel with search, host and "me" labels, mic and video status, **Rename**.
 - Meeting chat to everyone, with an unread badge.
 - **Notes:** private notes that save as you type (like Zoom's "My Notes") and show up later on the Meetings page.
-- **More menu:** Meeting info, plus Record, Whiteboards and Apps placeholders.
+- **More menu:** Meeting info (and, on small screens, the toolbar buttons that don't fit).
 - Meeting info popup (green shield): Meeting ID, host, passcode, invite link.
 - Live meeting timer and a "Locked" badge when the host locks the meeting.
 
@@ -279,7 +279,7 @@ Open http://localhost:3000. To try two people in one meeting, open the invite li
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Host controls are checked on the server,** but without login the host is identified by participant id. Real auth would replace this with a token.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Placeholders:** Team Chat, Calendar, Docs, Apps, Search, Settings, Notifications, Sign out, and Record, Whiteboards and Apps in the meeting's More menu show a "not part of this demo" message.
+- **Placeholders:** Team Chat, Calendar, Docs, Search, Settings, Notifications and Sign out show a "not part of this demo" message.
 - Times use the browser's time zone.
 - The Zoom wordmark is drawn as styled text, not the official logo file.
 
