@@ -1,42 +1,18 @@
-"""Team Chat: channels, direct messages, unread counts. Only the demo account has it."""
+"""Team Chat: channels, direct messages, unread counts.
+
+Everyone has Team Chat. You only see chats you are a member of, so the seeded
+sample chats stay on the demo account and new accounts start empty.
+"""
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import schemas
-from app.config import DEMO_EMAIL
 from app.models import ChannelMember, ChannelMessage, ChatChannel, User
 from app.services.errors import BadRequest, Forbidden, NotFound
 
-DEFAULT_CHANNEL_NAME = "General"
-
-
-def require_chat_access(user: User) -> User:
-    """Team Chat is a demo feature, so it is only turned on for the demo account."""
-    if user.email.lower() != DEMO_EMAIL:
-        raise Forbidden("Team Chat is only available on the demo account")
-    return user
-
-
 def person(user: User) -> schemas.PersonOut:
     return schemas.PersonOut.model_validate(user)
-
-
-def ensure_default_channel(db: Session, user: User) -> None:
-    """Everyone is a member of the "General" channel, like a company-wide channel in Zoom."""
-    general = db.scalar(select(ChatChannel).where(ChatChannel.is_default.is_(True)))
-    if general is None:
-        general = ChatChannel(name=DEFAULT_CHANNEL_NAME, is_default=True)
-        db.add(general)
-        db.flush()
-    is_member = db.scalar(
-        select(ChannelMember.id).where(
-            ChannelMember.channel_id == general.id, ChannelMember.user_id == user.id
-        )
-    )
-    if not is_member:
-        db.add(ChannelMember(channel_id=general.id, user_id=user.id))
-    db.commit()
 
 
 def _membership(db: Session, channel_id: int, user: User) -> ChannelMember:
@@ -96,7 +72,6 @@ def _channel_out(db: Session, channel: ChatChannel, me: User, last_read: int) ->
 
 
 def list_channels(db: Session, me: User) -> list[schemas.ChannelOut]:
-    ensure_default_channel(db, me)
     memberships = db.scalars(select(ChannelMember).where(ChannelMember.user_id == me.id)).all()
     channels = [_channel_out(db, m.channel, me, m.last_read_message_id) for m in memberships]
     # Most recently active first, like Zoom's chat list.

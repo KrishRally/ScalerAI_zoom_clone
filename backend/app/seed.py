@@ -181,11 +181,17 @@ def _seed_users(db: Session) -> dict[str, User]:
     return {u.email: u for u in db.scalars(select(User)).all()}
 
 
+def _sample_people(db: Session) -> dict[str, User]:
+    """The demo account and its seeded teammates, not people who signed up."""
+    emails = [DEFAULT_USER_EMAIL] + [email for _, email, _ in _OTHER_USERS]
+    return {u.email: u for u in db.scalars(select(User).where(User.email.in_(emails))).all()}
+
+
 def seed_team_chat(db: Session) -> None:
-    """A "General" channel with everyone, a project channel and a direct message."""
+    """Sample chats for the demo account only: "General", a project channel and a direct message."""
     if db.scalar(select(ChatChannel.id).limit(1)) is not None:
         return
-    users = _seed_users(db)
+    users = _sample_people(db)
     me = users.get(DEFAULT_USER_EMAIL)
     if me is None:
         return
@@ -218,6 +224,22 @@ def seed_team_chat(db: Session) -> None:
     say(dm, me, "Sure, call me after lunch.", 25)
     if sara:
         say(general, sara, "Reminder: the client demo is on Monday.", 15)
+    db.commit()
+
+
+def keep_sample_chats_private(db: Session) -> None:
+    """Older versions put every new account in the sample "General" channel.
+    Take them out (with anything they posted there) so it stays a demo-only chat."""
+    general = db.scalar(select(ChatChannel).where(ChatChannel.is_default.is_(True)))
+    if general is None:
+        return
+    sample_ids = {u.id for u in _sample_people(db).values()}
+    for member in list(general.members):
+        if member.user_id not in sample_ids:
+            db.delete(member)
+    for message in db.scalars(select(ChannelMessage).where(ChannelMessage.channel_id == general.id)).all():
+        if message.user_id not in sample_ids:
+            db.delete(message)
     db.commit()
 
 

@@ -11,7 +11,6 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import Spinner from "@/components/ui/Spinner";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
-import { hasTeamChat } from "@/lib/auth";
 import type { Channel } from "@/lib/types";
 
 // The list is refreshed this often for new messages and unread counts.
@@ -47,17 +46,11 @@ function ChatView() {
   const router = useRouter();
   const params = useSearchParams();
   const activeId = params.get("c") ? Number(params.get("c")) : null;
-  const allowed = hasTeamChat(user?.email);
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<NewChatMode | null>(null);
   const { starred, toggle } = useStarred();
-
-  // Team Chat is only on the demo account. Everyone else goes back home.
-  useEffect(() => {
-    if (user && !allowed) router.replace("/");
-  }, [user, allowed, router]);
 
   const reload = useCallback(async () => {
     try {
@@ -69,11 +62,10 @@ function ChatView() {
   }, []);
 
   useEffect(() => {
-    if (!allowed) return;
     reload();
     const id = setInterval(reload, LIST_POLL_MS);
     return () => clearInterval(id);
-  }, [allowed, reload]);
+  }, [reload]);
 
   const select = (id: number | null) => router.replace(id ? `/chat?c=${id}` : "/chat");
 
@@ -84,7 +76,7 @@ function ChatView() {
 
   const active = channels?.find((c) => c.id === activeId) ?? null;
 
-  if (!user || !allowed) return null;
+  if (!user) return null;
 
   return (
     <div className="flex h-[100dvh] flex-col bg-white">

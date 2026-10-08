@@ -10,8 +10,3 @@ export function safeNext(next: string | null): string {
 export const DEMO_EMAIL = "alex.johnson@example.com";
 export const DEMO_PASSWORD = "zoomdemo123";
 export const MIN_PASSWORD = 8;
-
-/** Team Chat is a demo feature, so it is only shown on the demo account. */
-export function hasTeamChat(email: string | null | undefined): boolean {
-  return email?.toLowerCase() === DEMO_EMAIL;
-}

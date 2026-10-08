@@ -31,12 +31,48 @@ def test_demo_account_has_seeded_chats(client, auth):
     assert {"General", "Dashboard v2", "Priya Sharma"} <= names
 
 
-def test_chat_is_only_for_the_demo_account(client, new_user):
+def test_new_accounts_start_with_no_chats(client, auth, new_user):
     h, _ = new_user("Newbie")
-    assert client.get("/api/chat/channels", headers=h).status_code == 403
-    assert client.get("/api/chat/unread", headers=h).status_code == 403
-    assert client.post("/api/chat/channels", json={"name": "mine"}, headers=h).status_code == 403
-    assert client.get("/api/chat/channels/1/messages", headers=h).status_code == 403
+    assert client.get("/api/chat/channels", headers=h).json() == []
+    assert client.get("/api/chat/unread", headers=h).json() == {"unread": 0}
+    # The sample chats belong to the demo account only.
+    general = next(c for c in client.get("/api/chat/channels", headers=auth).json() if c["name"] == "General")
+    assert client.get(f"/api/chat/channels/{general['id']}/messages", headers=h).status_code == 403
+    assert client.post(f"/api/chat/channels/{general['id']}/messages", json={"content": "hi"}, headers=h).status_code == 403
+
+
+def test_new_accounts_can_chat_with_each_other(client, new_user):
+    ha, a = new_user("Ann")
+    hb, b = new_user("Bob")
+    channel = client.post("/api/chat/channels", json={"name": "project-x", "member_ids": [b["id"]]}, headers=ha).json()
+    client.post(f"/api/chat/channels/{channel['id']}/messages", json={"content": "Hello Bob"}, headers=ha)
+    bob_view = next(c for c in client.get("/api/chat/channels", headers=hb).json() if c["id"] == channel["id"])
+    assert bob_view["unread_count"] == 1
+    client.post(f"/api/chat/channels/{channel['id']}/read", headers=hb)
+    assert client.get("/api/chat/unread", headers=hb).json()["unread"] == 0
+
+    dm = client.post("/api/chat/direct", json={"user_id": b["id"]}, headers=ha).json()
+    again = client.post("/api/chat/direct", json={"user_id": a["id"]}, headers=hb).json()
+    assert dm["id"] == again["id"] and dm["name"] == "Bob" and again["name"] == "Ann"
+    assert {c["name"] for c in client.get("/api/chat/channels", headers=hb).json()} == {"project-x", "Ann"}
+
+
+def test_sign_ups_are_taken_out_of_the_sample_general(client, auth, new_user):
+    from app.database import SessionLocal
+    from app.models import ChannelMember, ChannelMessage, ChatChannel
+    from app.seed import keep_sample_chats_private
+
+    h, me = new_user("Old Account")
+    with SessionLocal() as db:  # what older versions did on sign up
+        general = db.query(ChatChannel).filter(ChatChannel.is_default.is_(True)).one()
+        db.add(ChannelMember(channel_id=general.id, user_id=me["id"]))
+        db.add(ChannelMessage(channel_id=general.id, user_id=me["id"], content="old post"))
+        db.commit()
+        keep_sample_chats_private(db)
+    assert client.get("/api/chat/channels", headers=h).json() == []
+    demo_general = next(c for c in client.get("/api/chat/channels", headers=auth).json() if c["name"] == "General")
+    assert "Old Account" not in [m["name"] for m in demo_general["members"]]
+    assert demo_general["last_message"]["content"] != "old post"
 
 
 def test_channel_messages_and_read(client, auth):
