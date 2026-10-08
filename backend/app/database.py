@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import DATABASE_URL
@@ -33,3 +33,22 @@ def get_db() -> Iterator[Session]:
         yield db
     finally:
         db.close()
+
+
+def add_missing_columns() -> None:
+    """A tiny migration step for SQLite.
+
+    create_all() makes new tables but never changes existing ones. When a model
+    gains a new nullable column, this adds it to the live database on startup,
+    so existing data is kept. (A bigger project would use Alembic.)
+    """
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name not in existing and column.nullable:
+                    col_type = column.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}'))

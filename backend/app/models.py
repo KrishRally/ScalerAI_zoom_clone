@@ -131,6 +131,9 @@ class Participant(Base):
     is_muted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_video_on: Mapped[bool] = mapped_column(Boolean, default=True)
     is_hand_raised: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A random id each browser tab keeps, so rejoining from the same tab
+    # replaces the old entry instead of showing the person twice.
+    client_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     left_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Updated every time the participant's browser checks in.

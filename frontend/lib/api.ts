@@ -13,6 +13,7 @@ import type {
   ScheduleInput,
   User,
 } from "./types";
+import { getClientId } from "./session";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
@@ -76,7 +77,7 @@ export const api = {
   deleteMeeting: (c: string) => request<void>(`/api/meetings/${code(c)}`, { method: "DELETE" }),
 
   joinMeeting: (c: string, input: JoinInput) =>
-    post<Participant>(`/api/meetings/${code(c)}/join`, input),
+    post<Participant>(`/api/meetings/${code(c)}/join`, { client_id: getClientId() || undefined, ...input }),
   roomState: (c: string, participantId: number, afterMessageId: number) =>
     request<RoomState>(
       `/api/meetings/${code(c)}/state?participant_id=${participantId}&after_message_id=${afterMessageId}`,
@@ -109,6 +110,10 @@ export const api = {
       body: JSON.stringify(changes),
     }),
   leave: (participantId: number) => post<void>(`/api/participants/${participantId}/leave`),
+  /** Like leave, but still delivered if the page is going away (Back button, closing the tab). */
+  leaveInBackground: (participantId: number) => {
+    fetch(`${API_URL}/api/participants/${participantId}/leave`, { method: "POST", keepalive: true }).catch(() => {});
+  },
 
   // Host controls. requester_id lets the server check the caller is the host.
   muteAll: (c: string, requesterId: number) =>

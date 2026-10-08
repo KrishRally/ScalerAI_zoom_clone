@@ -92,7 +92,12 @@ def join_meeting(db: Session, meeting: Meeting, data: schemas.JoinRequest) -> Pa
         raise Forbidden("This meeting has been locked by the host")
 
     now = utcnow()
-    goes_to_waiting_room = settings.waiting_room and not is_owner
+
+    # Rejoining from the same browser (after pressing Back, refreshing or a crash)
+    # replaces the old entry, so the person isn't shown twice.
+    was_host, was_admitted = _replace_previous_entries(db, meeting, data.client_id, now)
+
+    goes_to_waiting_room = settings.waiting_room and not is_owner and not was_admitted
 
     if is_owner:
         # The meeting's owner always gets host back when they (re)join.
@@ -119,8 +124,9 @@ def join_meeting(db: Session, meeting: Meeting, data: schemas.JoinRequest) -> Pa
         meeting_id=meeting.id,
         user_id=data.user_id,
         display_name=data.display_name,
-        role=ParticipantRole.host if is_owner else ParticipantRole.attendee,
+        role=ParticipantRole.host if (is_owner or was_host) else ParticipantRole.attendee,
         status=ParticipantStatus.waiting if goes_to_waiting_room else ParticipantStatus.in_meeting,
+        client_id=data.client_id,
         is_muted=is_muted,
         is_video_on=is_video_on,
         joined_at=now,
@@ -130,6 +136,33 @@ def join_meeting(db: Session, meeting: Meeting, data: schemas.JoinRequest) -> Pa
     db.commit()
     db.refresh(participant)
     return participant
+
+
+def _replace_previous_entries(
+    db: Session, meeting: Meeting, client_id: str | None, now
+) -> tuple[bool, bool]:
+    """Mark this browser's earlier entries in the meeting as left.
+
+    Returns (was_host, was_admitted) so the new entry can keep the host role
+    and skip the waiting room if they had already been let in.
+    """
+    if not client_id:
+        return False, False
+    previous = list(
+        db.scalars(
+            select(Participant).where(
+                Participant.meeting_id == meeting.id,
+                Participant.client_id == client_id,
+                Participant.status.in_([ParticipantStatus.in_meeting, ParticipantStatus.waiting]),
+            )
+        ).all()
+    )
+    was_host = any(p.role == ParticipantRole.host for p in previous)
+    was_admitted = any(p.status == ParticipantStatus.in_meeting for p in previous)
+    for p in previous:
+        p.status = ParticipantStatus.left
+        p.left_at = now
+    return was_host, was_admitted
 
 
 def leave_meeting(db: Session, participant: Participant) -> None:

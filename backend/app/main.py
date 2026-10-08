@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import CORS_ORIGIN_REGEX, CORS_ORIGINS
-from app.database import Base, SessionLocal, engine
+from app.database import Base, SessionLocal, add_missing_columns, engine
 from app.routers import meetings, participants, users
 from app.seed import seed_database
 from app.services.errors import ServiceError
@@ -17,6 +17,7 @@ from app.services.errors import ServiceError
 async def lifespan(_app: FastAPI):
     # Small app, so we create tables directly instead of using migrations.
     Base.metadata.create_all(bind=engine)
+    add_missing_columns()
     with SessionLocal() as db:
         seed_database(db)
     yield

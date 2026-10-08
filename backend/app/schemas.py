@@ -143,6 +143,8 @@ class JoinRequest(BaseModel):
     user_id: int | None = None
     is_muted: bool = False
     is_video_on: bool = True
+    # The browser's own random id (see Participant.client_id).
+    client_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("display_name")
     @classmethod

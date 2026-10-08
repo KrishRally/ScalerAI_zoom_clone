@@ -51,6 +51,20 @@ function Room({ code, session }: { code: string; session: MeetingSession }) {
     if (endReason) clearMeetingSession(code);
   }, [endReason, code]);
 
+  // Leaving the room page any other way (the browser's Back button, a link)
+  // counts as leaving the meeting, so we don't stay behind as a "ghost".
+  // We check the address because in development React mounts components twice
+  // without actually navigating.
+  useEffect(() => {
+    const roomPath = window.location.pathname;
+    return () => {
+      if (window.location.pathname !== roomPath) {
+        api.leaveInBackground(session.participantId);
+        clearMeetingSession(code);
+      }
+    };
+  }, [code, session.participantId]);
+
   useEffect(() => {
     if (meeting) document.title = `${meeting.title} - Zoom`;
   }, [meeting]);

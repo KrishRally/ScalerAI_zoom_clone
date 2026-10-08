@@ -350,3 +350,39 @@ def test_notes_are_private_and_saved(client):
     assert guest_note["content"] == "Guest notes"
     # The signed in user can read their notes later from the Meetings page.
     assert client.get(f"/api/meetings/{code}/notes/mine").json()["content"] == "Host notes v2"
+
+
+def test_rejoining_from_same_browser_replaces_old_entry(client):
+    me = client.get("/api/users/me").json()
+    meeting = client.post("/api/meetings/instant").json()
+    code = meeting["meeting_code"]
+    host = client.post(
+        f"/api/meetings/{code}/join",
+        json={"display_name": me["name"], "user_id": me["id"], "client_id": "browser-a"},
+    ).json()
+    guest = client.post(
+        f"/api/meetings/{code}/join",
+        json={"display_name": "Guest", "passcode": meeting["passcode"], "client_id": "browser-b"},
+    ).json()
+    client.post(f"/api/participants/{guest['id']}/make-host", json={"requester_id": host["id"]})
+
+    # The guest (now host) presses Back and joins again from the same browser.
+    again = client.post(
+        f"/api/meetings/{code}/join",
+        json={"display_name": "Guest", "passcode": meeting["passcode"], "client_id": "browser-b"},
+    ).json()
+    assert again["role"] == "host"
+    state = client.get(f"/api/meetings/{code}/state", params={"participant_id": again["id"]}).json()
+    names = sorted(p["display_name"] for p in state["participants"])
+    assert names == ["Alex Johnson", "Guest"]  # not shown twice
+
+
+def test_admitted_person_skips_waiting_room_on_rejoin(client):
+    meeting, host = _start_instant(client)
+    code = meeting["meeting_code"]
+    _settings(client, code, host["id"], waiting_room=True)
+    body = {"display_name": "G", "passcode": meeting["passcode"], "client_id": "browser-c"}
+    first = client.post(f"/api/meetings/{code}/join", json=body).json()
+    client.post(f"/api/participants/{first['id']}/admit", json={"requester_id": host["id"]})
+    again = client.post(f"/api/meetings/{code}/join", json=body).json()
+    assert again["status"] == "in_meeting"

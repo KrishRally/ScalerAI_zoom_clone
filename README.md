@@ -55,6 +55,8 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 
 **Room updates use polling.** Every 2 seconds the room calls `GET /api/meetings/{code}/state`. One call returns the meeting, the participant list, new chat messages and your own status. The same call is also a heartbeat: anyone who stops calling for 30 seconds (closed tab, lost network) is marked as left. When the last person leaves, the meeting moves to "ended" and shows up in Recent.
 
+**No duplicate people.** Leaving the room page any way (the Leave button, the browser's Back button, a link) tells the server you left. Each browser tab also sends a random `client_id` when it joins; if the same tab joins again (after Back, a refresh or a crash), the server replaces its old entry instead of adding a second one, and keeps the host role if it had it.
+
 **Mute sync.** Your mic and camera are controlled in the browser and pushed to the server. When the host mutes you (or suspends activities), the next poll sees `is_muted = true` or `is_video_on = false` and the browser turns your mic or camera off with a message. Your own changes win for a few seconds, so an old poll result can't undo a click.
 
 **Host rules.** The same poll returns the meeting's settings, so when the host flips a switch everyone's buttons update within 2 seconds. The server checks every rule again on each request (chat, reactions, unmute, video, rename, joining a locked meeting), so the rules hold even if someone skips the UI.
@@ -110,6 +112,7 @@ erDiagram
         bool is_muted
         bool is_video_on
         bool is_hand_raised
+        string client_id "per browser tab, for rejoin"
         datetime joined_at
         datetime left_at
         datetime last_seen_at "heartbeat"
@@ -159,6 +162,7 @@ Design choices:
 - **One participant row per join.** This keeps a history of who was in each meeting, which is how "Recent meetings" and the meeting duration work.
 - **`status` columns instead of deleting rows.** Leaving or being removed keeps the row, so history and chat authors stay intact.
 - **Chat links to the participant, not the user.** Guests can chat too, and the message shows the name used in that meeting.
+- **Schema changes on a live database.** New tables are created on startup by `create_all()`. New nullable columns on existing tables (like `participants.client_id`) are added by a small `add_missing_columns()` step in `database.py`, so the deployed SQLite file upgrades without losing data. A bigger project would use Alembic.
 - **`meeting_settings` is its own table (one row per meeting)** rather than nine more columns on `meetings`. The meetings table stays focused, settings can grow on their own, and because new tables are created on startup, the live database picked them up without a migration. Meetings created before settings existed get a default row the first time it's needed.
 - **`meeting_notes` has two optional owners.** The signed in user's notes are keyed by `user_id`, so it's the same note if they leave and rejoin. Guests have no user, so their notes are keyed by `participant_id`. Two unique indexes, `(meeting_id, user_id)` and `(meeting_id, participant_id)`, keep one note per person (SQLite ignores NULLs in unique indexes, so each rule only applies to its own kind of note).
 - **`reactions` are rows, not a column on participants,** so several people can react at once and the server can enforce "allow reactions". They're only read for the last few seconds.

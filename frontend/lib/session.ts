@@ -92,3 +92,24 @@ export function saveShowPreview(on: boolean) {
     // ignore
   }
 }
+
+// A random id for this browser tab. Sent when joining so that rejoining from
+// the same tab replaces the old entry instead of showing the person twice
+// (for example after pressing Back or refreshing). It lives in sessionStorage,
+// which is per tab, so two tabs can still be two different people.
+const CLIENT_ID_KEY = "zoom-client-id";
+
+export function getClientId(): string {
+  try {
+    let id = sessionStorage.getItem(CLIENT_ID_KEY);
+    if (!id) {
+      id = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}

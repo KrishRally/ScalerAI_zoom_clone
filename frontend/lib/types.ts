@@ -117,4 +117,5 @@ export interface JoinInput {
   user_id?: number;
   is_muted?: boolean;
   is_video_on?: boolean;
+  client_id?: string;
 }
