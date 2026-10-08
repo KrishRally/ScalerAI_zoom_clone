@@ -36,6 +36,7 @@ from app.services.codes import (
     generate_passcode,
     generate_personal_meeting_id,
 )
+from app.services.meetings import list_upcoming
 from app.services.security import hash_password
 
 DEFAULT_USER_EMAIL = DEMO_EMAIL
@@ -74,6 +75,40 @@ def ensure_demo_password(db: Session) -> None:
         db.commit()
 
 
+def _add_upcoming_samples(db: Session, me: User, now) -> None:
+    for title, description, starts_in, duration in _UPCOMING:
+        start = now + starts_in
+        db.add(
+            Meeting(
+                meeting_code=generate_meeting_code(db),
+                title=title,
+                description=description,
+                host_id=me.id,
+                meeting_type=MeetingType.scheduled,
+                status=MeetingStatus.scheduled,
+                passcode=generate_passcode(),
+                # Round to the hour or half hour like a real calendar.
+                scheduled_start=start.replace(minute=0 if start.minute < 30 else 30, second=0, microsecond=0),
+                duration_minutes=duration,
+            )
+        )
+        db.flush()  # so the next meeting code is checked against this one
+
+
+def refresh_sample_meetings(db: Session) -> None:
+    """Sample times count from the day the database was first filled, so after a
+    few days they are all in the past and the dashboard says "No upcoming
+    meetings". When the demo user has nothing coming up, add a fresh set.
+
+    Only when the list is empty, so a meeting someone deletes doesn't pop back.
+    """
+    me = db.scalar(select(User).where(User.email == DEFAULT_USER_EMAIL))
+    if me is None or list_upcoming(db, me):
+        return
+    _add_upcoming_samples(db, me, utcnow())
+    db.commit()
+
+
 def seed_database(db: Session) -> None:
     if db.scalar(select(User.id).limit(1)) is not None:
         return  # already seeded
@@ -100,26 +135,7 @@ def seed_database(db: Session) -> None:
 
     now = utcnow()
 
-    for title, description, starts_in, duration in _UPCOMING:
-        db.add(
-            Meeting(
-                meeting_code=generate_meeting_code(db),
-                title=title,
-                description=description,
-                host_id=me.id,
-                meeting_type=MeetingType.scheduled,
-                status=MeetingStatus.scheduled,
-                passcode=generate_passcode(),
-                # Round to the hour or half hour like a real calendar.
-                scheduled_start=(now + starts_in).replace(
-                    minute=0 if (now + starts_in).minute < 30 else 30,
-                    second=0,
-                    microsecond=0,
-                ),
-                duration_minutes=duration,
-            )
-        )
-        db.flush()
+    _add_upcoming_samples(db, me, now)
 
     for title, meeting_type, ago, lasted, guests in _RECENT:
         started = now - ago

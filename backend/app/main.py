@@ -9,7 +9,14 @@ from fastapi.responses import JSONResponse
 from app.config import CORS_ORIGIN_REGEX, CORS_ORIGINS
 from app.database import Base, SessionLocal, add_missing_columns, engine
 from app.routers import auth, documents, meetings, notifications, participants, team_chat, users
-from app.seed import ensure_demo_password, keep_sample_chats_private, seed_database, seed_docs, seed_team_chat
+from app.seed import (
+    ensure_demo_password,
+    keep_sample_chats_private,
+    refresh_sample_meetings,
+    seed_database,
+    seed_docs,
+    seed_team_chat,
+)
 from app.services.errors import ServiceError
 
 
@@ -20,6 +27,7 @@ async def lifespan(_app: FastAPI):
     add_missing_columns()
     with SessionLocal() as db:
         seed_database(db)
+        refresh_sample_meetings(db)
         ensure_demo_password(db)
         seed_team_chat(db)
         keep_sample_chats_private(db)

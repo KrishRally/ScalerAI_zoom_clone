@@ -6,6 +6,43 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 - **API docs (Swagger):** https://scaleraizoomclone-production.up.railway.app/docs
 - **No login needed:** opening the app signs you in as the default user, Alex Johnson (`alex.johnson@example.com` / `zoomdemo123`), who already has meetings. Sign up with your own email if you like.
 
+## Brief checklist
+
+Every item from the assignment, and where to find it.
+
+| Requirement | Status | Where |
+|---|---|---|
+| **1. Landing dashboard** | | |
+| Clean Zoom style UI | Done | Home page `/` (`frontend/app/page.tsx`, `components/home/`) |
+| Navbar with profile / settings | Done, and they work | `components/layout/TopNav.tsx`: profile menu (name, email, Personal Meeting ID, Sign out), gear opens `/settings`, plus working search and notifications |
+| New Meeting / Join Meeting / Schedule Meeting buttons | Done | The big tiles on Home (`components/home/ActionTile.tsx`) |
+| Upcoming meetings section | Done | Home, and the Meetings tab (`/meetings`) |
+| Recent meetings section | Done | Home, and Meetings > Recent |
+| **2. Instant meeting** | | |
+| Create a meeting instantly | Done | New meeting tile → `POST /api/meetings/instant` (`services/meetings.py`, `create_instant_meeting`) |
+| Unique Meeting ID | Done | Random 10 digit ID, checked against the database and stored with a unique index (`services/codes.py`) |
+| Shareable invite link | Done | `/j/<id>?pwd=<passcode>`, shown in the meeting info and "Copy invitation" |
+| Redirect to the meeting room | Done | Goes to the preview screen, then the room (`/meeting/<id>`) |
+| **3. Join meeting** | | |
+| Join with Meeting ID or invite link | Done | Join tile (`components/modals/JoinMeetingModal.tsx`) takes either; opening a link goes to `/j/<id>` |
+| Enter display name first | Done | "Your name" on the join screen (`app/j/[code]/page.tsx`) |
+| Check the meeting exists | Done | Wrong IDs show "This meeting ID is not valid", checked on the server (`GET /api/meetings/lookup?q=`) |
+| **4. Schedule meetings** | | |
+| Title / description | Done | `components/modals/ScheduleMeetingModal.tsx` |
+| Date and time picker, duration | Done | Same form (date, time, hours and minutes) |
+| Meeting link made automatically | Done | Shown right after saving (`MeetingSavedModal.tsx`) |
+| Stored in the database | Done | `meetings` table, `meeting_type = scheduled` |
+| Shown in Upcoming meetings | Done | Home and Meetings tab, sorted by start time; also on the Calendar |
+| **Bonus** | | |
+| Responsive (mobile, tablet, desktop) | Done | Tested at phone width with no sideways scrolling; the room toolbar folds extra buttons into "More" on small screens |
+| Login / Signup | Done | `/signin`, `/signup`, real email accounts, hashed passwords, session tokens |
+| Host controls (mute all / remove) | Done, plus more | Participants panel and Host tools: mute all, remove, waiting room, lock, make host, rename, allow or block chat, video and more |
+| **Notes from the brief** | | |
+| No login required | Done | A default user (Alex Johnson) is signed in automatically; see "Assumptions" |
+| Sample data | Done | `backend/app/seed.py`: users, upcoming and past meetings, chats, docs. Upcoming samples refill themselves when they run out |
+| Own database schema | Done | See "Database schema" below (diagram and reasons) |
+| README with setup, stack, assumptions | Done | "Run it locally", "Tech stack", "Assumptions and limits" |
+
 ## Tech stack
 
 | Part | Choice | Why |
@@ -278,6 +315,7 @@ Interactive docs are at `/docs` on the backend.
 | GET / POST | `/api/chat/channels` | Your conversations (with unread counts) / create a channel |
 | POST | `/api/chat/direct` | Open (or start) a direct message with someone |
 | GET | `/api/chat/unread` | Total unread messages, for the tab badge |
+| GET | `/api/meetings/search?q=` | Your meetings matching a title or Meeting ID (top bar search) |
 | GET | `/api/notifications` | The bell: unread chats, docs shared with you, your meetings starting within an hour, with a count of new ones |
 | POST | `/api/notifications/seen` | Mark everything in the bell as seen |
 | GET / POST | `/api/chat/channels/{id}/messages?after_id=` | Read new messages / send one |
@@ -391,7 +429,8 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Placeholder:** the top search box shows a "not part of this demo" message.
+- **Search** looks through your own meetings (hosted or joined) by title or Meeting ID. Pasting a full Meeting ID or invite link that isn't yours offers "Join meeting". Ctrl+F (Cmd+F) jumps to it, like in Zoom. It is shown on wide screens only.
+- **Sample meetings refill themselves.** Their times count from the first start, so after a few days they would all be in the past. When the demo user has no upcoming meetings left, a fresh set is added (`refresh_sample_meetings`, on startup and when the dashboard loads). It only happens when the list is empty, so a meeting you delete does not come back.
 - **Notifications are built, not stored.** The bell is made on each request from data the app already has (unread chats, `document_members.added_at`, upcoming meetings), so there is no notifications table to keep in sync. One column, `users.notifications_seen_at`, decides which items are new. It refreshes every 20 seconds.
 - **Sample chats are demo-only.** You only see chats you are a member of, and only the demo account and its seeded teammates are in the sample chats. On startup, `keep_sample_chats_private` also removes accounts that older versions auto-added to "General" (with their posts there).
 - **Team Chat and Docs update by polling** (every few seconds), like the meeting room. Two people typing in the same document at the same moment: the last save wins; edits from others appear when you pause typing.

@@ -117,6 +117,8 @@ export const api = {
   channels: () => request<Channel[]>("/api/chat/channels"),
   chatUnread: () => request<{ unread: number }>("/api/chat/unread"),
 
+  searchMeetings: (q: string) => request<Meeting[]>(`/api/meetings/search?q=${encodeURIComponent(q)}`),
+
   // Notifications bell
   notifications: () => request<Notifications>("/api/notifications"),
   markNotificationsSeen: () => post<void>("/api/notifications/seen"),

@@ -7,6 +7,7 @@ from app import schemas
 from app.database import get_db
 from app.dependencies import get_current_user, get_optional_user, participant_token
 from app.models import User
+from app.seed import DEFAULT_USER_EMAIL, refresh_sample_meetings
 from app.services import meetings as meeting_service
 from app.services import participants as participant_service
 from app.services.errors import Forbidden
@@ -19,6 +20,9 @@ def upcoming_meetings(
     db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
     participant_service.expire_stale_everywhere(db)
+    if user.email == DEFAULT_USER_EMAIL:
+        # Keep the shared demo dashboard from going empty as the sample dates pass.
+        refresh_sample_meetings(db)
     return [
         meeting_service.to_meeting_out(db, m)
         for m in meeting_service.list_upcoming(db, user)
@@ -31,6 +35,11 @@ def recent_meetings(db: Session = Depends(get_db), user: User = Depends(get_curr
     return [
         meeting_service.to_meeting_out(db, m) for m in meeting_service.list_recent(db, user)
     ]
+
+
+@router.get("/search", response_model=list[schemas.MeetingOut])
+def search_meetings(q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return [meeting_service.to_meeting_out(db, m) for m in meeting_service.search_meetings(db, user, q)]
 
 
 @router.get("/calendar", response_model=list[schemas.MeetingOut])

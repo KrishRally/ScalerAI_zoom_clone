@@ -26,6 +26,11 @@ function MeetingsView() {
   const { startExisting, starting } = useStartMeeting();
   const { openSchedule, openEdit, remove, dialogs } = useScheduleDialogs(reload);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // "?m=<id>" (from the top bar search) picks a meeting.
+  const pickedId = params.get("m");
+  useEffect(() => {
+    if (pickedId) setSelectedId(Number(pickedId));
+  }, [pickedId]);
   // On small screens we show either the list or the details, not both.
   const [showDetailsOnMobile, setShowDetailsOnMobile] = useState(false);
 

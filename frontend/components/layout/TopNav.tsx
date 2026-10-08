@@ -8,16 +8,15 @@ import {
   FileText,
   Home,
   MessageSquare,
-  Search,
   LogOut,
   Settings,
   Video,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import NotificationBell from "@/components/layout/NotificationBell";
+import SearchBox from "@/components/layout/SearchBox";
 import ZoomLogo from "@/components/ui/ZoomLogo";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
 
 const TABS = [
@@ -45,12 +44,9 @@ export default function TopNav() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const router = useRouter();
-  const toast = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   // The chat page shows its own counts, so don't poll from here while on it.
   const chatUnread = useChatUnread(!!user && !pathname.startsWith("/chat"));
-
-  const comingSoon = (label: string) => toast(`${label} is not part of this demo`, "info");
 
   return (
     <header className="sticky top-0 z-40 border-b border-zoom-border bg-white">
@@ -86,14 +82,7 @@ export default function TopNav() {
         </nav>
 
         <div className="mx-auto hidden max-w-md flex-1 lg:block">
-          <label className="flex items-center gap-2 rounded-lg bg-zoom-surface px-3 py-2 text-sm text-zoom-muted ring-zoom-blue/30 focus-within:ring-2">
-            <Search className="h-4 w-4" />
-            <input
-              className="w-full bg-transparent text-zoom-text outline-none placeholder:text-zoom-muted"
-              placeholder="Search (Ctrl+F)"
-              onKeyDown={(e) => e.key === "Enter" && comingSoon("Search")}
-            />
-          </label>
+          <SearchBox />
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-1">

@@ -169,6 +169,27 @@ def list_recent(db: Session, user: User, limit: int = 20) -> list[Meeting]:
     )
 
 
+def search_meetings(db: Session, user: User, q: str, limit: int = 8) -> list[Meeting]:
+    """Your meetings (hosted or joined) whose title or Meeting ID matches. Spaces in IDs are ignored."""
+    q = q.strip()
+    if not q:
+        return []
+    digits = "".join(ch for ch in q if ch.isdigit())
+    match = Meeting.title.ilike(f"%{q}%")
+    if len(digits) >= 3 and len(digits) == len(q.replace(" ", "").replace("-", "")):
+        match = or_(match, Meeting.meeting_code.contains(digits))
+    joined_ids = select(Participant.meeting_id).where(Participant.user_id == user.id)
+    when = func.coalesce(Meeting.scheduled_start, Meeting.started_at, Meeting.created_at)
+    return list(
+        db.scalars(
+            select(Meeting)
+            .where(or_(Meeting.host_id == user.id, Meeting.id.in_(joined_ids)), match)
+            .order_by(when.desc())
+            .limit(limit)
+        ).all()
+    )
+
+
 def update_meeting(
     db: Session, user: User, meeting: Meeting, data: schemas.MeetingUpdate
 ) -> Meeting:

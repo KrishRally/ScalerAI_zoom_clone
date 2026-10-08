@@ -462,3 +462,36 @@ def test_admitted_person_skips_waiting_room_on_rejoin(client, start_instant):
     _host_action(client, f"/api/participants/{first['id']}/admit", host)
     again = _guest(client, meeting, "G", client_id="tab-c").json()
     assert again["status"] == "in_meeting"
+
+
+def test_sample_meetings_refill_when_none_are_left(client, auth):
+    from app.database import SessionLocal
+    from app.models import Meeting, MeetingStatus, User
+    from app.seed import DEFAULT_USER_EMAIL
+
+    # Pretend the sample dates have passed: end every upcoming meeting of the demo user.
+    with SessionLocal() as db:
+        demo = db.query(User).filter(User.email == DEFAULT_USER_EMAIL).one()
+        for m in db.query(Meeting).filter(Meeting.host_id == demo.id, Meeting.status != MeetingStatus.ended):
+            m.status = MeetingStatus.ended
+        db.commit()
+
+    upcoming = client.get("/api/meetings/upcoming", headers=auth).json()
+    assert "Daily Standup" in [m["title"] for m in upcoming]
+
+    # Not empty any more, so deleting one does not bring it straight back.
+    standup = next(m for m in upcoming if m["title"] == "Daily Standup")
+    assert client.delete(f"/api/meetings/{standup['meeting_code']}", headers=auth).status_code == 204
+    titles = [m["title"] for m in client.get("/api/meetings/upcoming", headers=auth).json()]
+    assert "Daily Standup" not in titles and titles
+
+
+def test_search_meetings(client, auth):
+    found = client.get("/api/meetings/search", params={"q": "sprint"}, headers=auth).json()
+    assert found and {m["title"] for m in found} == {"Sprint Planning"}
+    code = found[0]["meeting_code"]
+    spaced = f"{code[:3]} {code[3:6]} {code[6:]}"  # people paste IDs with spaces
+    assert [m["meeting_code"] for m in client.get("/api/meetings/search", params={"q": spaced}, headers=auth).json()] == [code]
+    assert client.get("/api/meetings/search", params={"q": "zzz-nothing"}, headers=auth).json() == []
+    assert client.get("/api/meetings/search", params={"q": " "}, headers=auth).json() == []
+    assert client.get("/api/meetings/search", params={"q": "sprint"}).status_code == 401
