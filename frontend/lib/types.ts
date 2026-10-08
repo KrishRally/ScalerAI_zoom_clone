@@ -182,3 +182,20 @@ export interface DocumentFull extends DocumentSummary {
   content: string;
   members: { user: Person; can_edit: boolean }[];
 }
+
+export interface AppNotification {
+  id: string;
+  kind: "chat" | "doc" | "meeting";
+  title: string;
+  body: string;
+  created_at: string;
+  link: string;
+  unseen: boolean;
+  actor: Person | null;
+  meeting_code: string | null;
+}
+
+export interface Notifications {
+  items: AppNotification[];
+  unseen: number;
+}

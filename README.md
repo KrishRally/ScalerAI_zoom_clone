@@ -26,6 +26,7 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 
 **Team Chat, Calendar and Docs (bonus)**
 - **Team Chat:** laid out like Zoom's desktop Chat. A "Chat" header with settings and a round blue **+** (New chat, New channel), filter pills (**All**, **@** mentions, unread, and **...** for Direct messages or Channels), and folding sections: **Chats & Channels**, **Shared spaces** and **Starred** (stars are saved in your browser). With nothing open, the right side shows the "Start chatting" picture. Unread counts per chat, an unread badge on the tab, and new messages appear within a few seconds. **Every account has Team Chat.** The sample chats (General, Dashboard v2, the chat with Priya) belong to the demo account only; new accounts start with an empty list and make their own chats and channels with anyone who has an account.
+- **Notifications:** the bell in the top bar shows a red count of new items. Open it to see new chat messages, docs someone shared with you, and your meetings starting within the hour (with a **Start** button). Click an item to jump to it. Opening the bell clears the count; reading a chat removes it from the list.
 - **Calendar:** Zoom style **week view** (and day view on phones) of your meetings, with Today / previous / next, a current time line, overlapping meetings side by side, and past meetings greyed out. Click a meeting to Start, Copy invitation, Edit or Delete it. **Click an empty time slot to schedule a meeting at that time.**
 - **Docs:** create documents from templates (Blank, Meeting notes, Project plan, 1:1 agenda), edit with **autosave**, see who edited last, search and filter (All / Owned by me / Shared with me), and **share by email** as editor or viewer. Viewers get a read-only page. Edits from others show up while you're not typing.
 
@@ -113,6 +114,7 @@ erDiagram
         string personal_meeting_id UK
         string password_hash "salted PBKDF2"
         datetime created_at
+        datetime notifications_seen_at "bell last opened"
     }
     meetings {
         int id PK
@@ -276,6 +278,8 @@ Interactive docs are at `/docs` on the backend.
 | GET / POST | `/api/chat/channels` | Your conversations (with unread counts) / create a channel |
 | POST | `/api/chat/direct` | Open (or start) a direct message with someone |
 | GET | `/api/chat/unread` | Total unread messages, for the tab badge |
+| GET | `/api/notifications` | The bell: unread chats, docs shared with you, your meetings starting within an hour, with a count of new ones |
+| POST | `/api/notifications/seen` | Mark everything in the bell as seen |
 | GET / POST | `/api/chat/channels/{id}/messages?after_id=` | Read new messages / send one |
 | POST | `/api/chat/channels/{id}/read` | Mark a conversation as read |
 | GET / POST | `/api/docs` | Your documents and ones shared with you / create one |
@@ -386,7 +390,8 @@ Open http://localhost:3000 and sign in with the demo account (`alex.johnson@exam
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Placeholders:** the top search box and the notifications bell show a "not part of this demo" message.
+- **Placeholder:** the top search box shows a "not part of this demo" message.
+- **Notifications are built, not stored.** The bell is made on each request from data the app already has (unread chats, `document_members.added_at`, upcoming meetings), so there is no notifications table to keep in sync. One column, `users.notifications_seen_at`, decides which items are new. It refreshes every 20 seconds.
 - **Sample chats are demo-only.** You only see chats you are a member of, and only the demo account and its seeded teammates are in the sample chats. On startup, `keep_sample_chats_private` also removes accounts that older versions auto-added to "General" (with their posts there).
 - **Team Chat and Docs update by polling** (every few seconds), like the meeting room. Two people typing in the same document at the same moment: the last save wins; edits from others appear when you pause typing.
 - Times use the browser's time zone.

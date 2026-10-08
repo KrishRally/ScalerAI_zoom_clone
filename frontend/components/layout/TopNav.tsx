@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Bell,
   CalendarDays,
   FileText,
   Home,
@@ -15,6 +14,7 @@ import {
   Video,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
+import NotificationBell from "@/components/layout/NotificationBell";
 import ZoomLogo from "@/components/ui/ZoomLogo";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
@@ -97,13 +97,7 @@ export default function TopNav() {
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <button
-            className="hidden rounded-md p-2 text-zoom-muted hover:bg-zoom-surface hover:text-zoom-ink sm:block"
-            aria-label="Notifications"
-            onClick={() => comingSoon("Notifications")}
-          >
-            <Bell className="h-5 w-5" />
-          </button>
+          <NotificationBell />
           <Link
             href="/settings"
             className={`hidden rounded-md p-2 hover:bg-zoom-surface hover:text-zoom-ink sm:block ${

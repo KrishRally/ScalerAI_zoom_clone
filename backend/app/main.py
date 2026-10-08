@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import CORS_ORIGIN_REGEX, CORS_ORIGINS
 from app.database import Base, SessionLocal, add_missing_columns, engine
-from app.routers import auth, documents, meetings, participants, team_chat, users
+from app.routers import auth, documents, meetings, notifications, participants, team_chat, users
 from app.seed import ensure_demo_password, keep_sample_chats_private, seed_database, seed_docs, seed_team_chat
 from app.services.errors import ServiceError
 
@@ -51,6 +51,7 @@ app.include_router(meetings.router)
 app.include_router(participants.router)
 app.include_router(team_chat.router)
 app.include_router(documents.router)
+app.include_router(notifications.router)
 
 
 @app.get("/api/health", tags=["health"])

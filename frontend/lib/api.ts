@@ -13,6 +13,7 @@ import type {
   MeetingLookup,
   MeetingSettings,
   Note,
+  Notifications,
   Participant,
   Person,
   Reaction,
@@ -115,6 +116,11 @@ export const api = {
   // ---------- Team Chat ----------
   channels: () => request<Channel[]>("/api/chat/channels"),
   chatUnread: () => request<{ unread: number }>("/api/chat/unread"),
+
+  // Notifications bell
+  notifications: () => request<Notifications>("/api/notifications"),
+  markNotificationsSeen: () => post<void>("/api/notifications/seen"),
+
   createChannel: (name: string, memberIds: number[]) =>
     post<Channel>("/api/chat/channels", { name, member_ids: memberIds }),
   openDirect: (userId: number) => post<Channel>("/api/chat/direct", { user_id: userId }),

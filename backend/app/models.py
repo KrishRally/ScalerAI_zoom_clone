@@ -77,6 +77,8 @@ class User(Base):
     # Salted PBKDF2 hash, never the password itself. See services/security.py.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # When the user last opened the notifications bell. Newer items count as unseen.
+    notifications_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     hosted_meetings: Mapped[list["Meeting"]] = relationship(back_populates="host")
     settings: Mapped["UserSettings | None"] = relationship(

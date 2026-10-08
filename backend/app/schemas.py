@@ -5,7 +5,7 @@ which fields go over the wire.
 """
 
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -430,6 +430,26 @@ class ChannelOut(BaseModel):
 
 class UnreadOut(BaseModel):
     unread: int
+
+
+# ---------- Notifications ----------
+
+
+class NotificationOut(BaseModel):
+    id: str  # stable, e.g. "chat-3" or "doc-7"
+    kind: Literal["chat", "doc", "meeting"]
+    title: str
+    body: str
+    created_at: UTCOutput
+    link: str
+    unseen: bool
+    actor: PersonOut | None = None
+    meeting_code: str | None = None
+
+
+class NotificationsOut(BaseModel):
+    items: list[NotificationOut]
+    unseen: int
 
 
 # ---------- Docs ----------

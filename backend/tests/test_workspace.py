@@ -177,3 +177,38 @@ def test_calendar_range(client, auth):
         headers=auth,
     ).json()
     assert far == []
+
+
+# ---------- Notifications ----------
+
+
+def test_notifications(client, new_user):
+    ha, a = new_user("Nina")
+    hb, b = new_user("Omar")
+    assert client.get("/api/notifications", headers=hb).json() == {"items": [], "unseen": 0}
+
+    # A chat message, a shared doc and a meeting starting soon.
+    dm = client.post("/api/chat/direct", json={"user_id": b["id"]}, headers=ha).json()
+    client.post(f"/api/chat/channels/{dm['id']}/messages", json={"content": "Ping"}, headers=ha)
+    doc = client.post("/api/docs", json={"title": "Plan"}, headers=ha).json()
+    client.post(f"/api/docs/{doc['id']}/members", json={"email": b["email"], "can_edit": False}, headers=ha)
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat()
+    client.post("/api/meetings/scheduled", json={"title": "Sync", "scheduled_start": soon}, headers=hb)
+    later = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+    client.post("/api/meetings/scheduled", json={"title": "Later", "scheduled_start": later}, headers=hb)
+
+    res = client.get("/api/notifications", headers=hb).json()
+    by_kind = {n["kind"]: n for n in res["items"]}
+    assert set(by_kind) == {"chat", "doc", "meeting"} and res["unseen"] == 3
+    assert by_kind["chat"]["title"] == "Nina sent you a message" and by_kind["chat"]["body"] == "Ping"
+    assert by_kind["chat"]["link"] == f"/chat?c={dm['id']}"
+    assert by_kind["doc"]["title"] == 'Nina shared "Plan" with you'
+    assert by_kind["meeting"]["title"].startswith("Sync starts in")  # "Later" is too far away
+
+    # Opening the bell marks everything as seen; reading the chat removes it.
+    assert client.post("/api/notifications/seen", headers=hb).status_code == 204
+    res = client.get("/api/notifications", headers=hb).json()
+    assert res["unseen"] == 0 and len(res["items"]) == 3
+    client.post(f"/api/chat/channels/{dm['id']}/read", headers=hb)
+    assert {n["kind"] for n in client.get("/api/notifications", headers=hb).json()["items"]} == {"doc", "meeting"}
+    assert client.get("/api/notifications").status_code == 401

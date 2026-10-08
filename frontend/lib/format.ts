@@ -108,3 +108,12 @@ export function colorFor(name: string): string {
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
+
+/** "Just now", "5m ago", "3h ago", then a date. */
+export function timeAgo(iso: string, now = Date.now()): string {
+  const mins = Math.floor((now - new Date(iso).getTime()) / 60_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)}h ago`;
+  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+}
