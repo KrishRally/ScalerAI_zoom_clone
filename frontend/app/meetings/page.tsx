@@ -62,7 +62,7 @@ function MeetingsView() {
         >
           <div className="flex items-center justify-between px-4 pb-2 pt-4">
             <h1 className="text-lg font-bold text-zoom-ink">Meetings</h1>
-            <button className="btn-primary px-3 py-1.5" onClick={openSchedule}>
+            <button className="btn-primary px-3 py-1.5" onClick={() => openSchedule()}>
               <Plus className="h-4 w-4" /> Schedule
             </button>
           </div>
@@ -89,7 +89,7 @@ function MeetingsView() {
             ) : list.length === 0 ? (
               <EmptyState
                 title={tab === "upcoming" ? "No upcoming meetings" : "No previous meetings"}
-                action={tab === "upcoming" ? <button className="btn-primary mt-3" onClick={openSchedule}>Schedule a meeting</button> : undefined}
+                action={tab === "upcoming" ? <button className="btn-primary mt-3" onClick={() => openSchedule()}>Schedule a meeting</button> : undefined}
               />
             ) : (
               groups.map(([day, meetings]) => (

@@ -15,10 +15,13 @@ export function useScheduleDialogs(onChanged: () => void) {
   const toast = useToast();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Meeting | null>(null);
+  const [initialStart, setInitialStart] = useState<Date | null>(null);
   const [saved, setSaved] = useState<Meeting | null>(null);
 
-  const openSchedule = useCallback(() => {
+  /** Open the Schedule form, optionally at a suggested start time. */
+  const openSchedule = useCallback((start?: Date) => {
     setEditing(null);
+    setInitialStart(start ?? null);
     setFormOpen(true);
   }, []);
 
@@ -53,6 +56,7 @@ export function useScheduleDialogs(onChanged: () => void) {
       <ScheduleMeetingModal
         open={formOpen}
         editing={editing}
+        initialStart={initialStart}
         onClose={() => setFormOpen(false)}
         onSaved={handleSaved}
       />

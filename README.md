@@ -24,8 +24,13 @@ A Zoom Workplace style web app where you can start instant meetings, join with a
 - The dashboard, Meetings and Settings pages need an account; signed out visitors are sent to Sign in and brought back afterwards. **Guests can still join a meeting from an invite link without an account**, like Zoom.
 - **Settings page:** change your name and profile colour, change your password (signs out your other devices), meeting defaults (start with video, join muted, always show preview, waiting room and mute on entry for new meetings), and test and pick your microphone and camera.
 
+**Team Chat, Calendar and Docs (bonus)**
+- **Team Chat:** a company-wide **General** channel everyone joins, channels you create (add people, leave), and **direct messages** with anyone who has an account (search by name or email). Unread counts per conversation, an unread badge on the Team Chat tab, messages grouped by person and day, new messages appear within a few seconds.
+- **Calendar:** Zoom style **week view** (and day view on phones) of your meetings, with Today / previous / next, a current time line, overlapping meetings side by side, and past meetings greyed out. Click a meeting to Start, Copy invitation, Edit or Delete it. **Click an empty time slot to schedule a meeting at that time.**
+- **Docs:** create documents from templates (Blank, Meeting notes, Project plan, 1:1 agenda), edit with **autosave**, see who edited last, search and filter (All / Owned by me / Shared with me), and **share by email** as editor or viewer. Viewers get a read-only page. Edits from others show up while you're not typing.
+
 **Core**
-- **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, search, settings, profile menu), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
+- **Dashboard:** Zoom style top navbar (Home, Team Chat, Meetings, Calendar, Docs, search, settings, profile menu with Sign out), the four big action tiles (New meeting, Join, Schedule, Share screen), a live clock card, **Upcoming meetings** and **Recent meetings**.
 - **Instant meeting:** one click creates a meeting with a unique 10 digit Meeting ID, a passcode and a shareable invite link, then drops you into the room as host. The arrow on the tile lets you choose to start with video off.
 - **Join meeting:** by Meeting ID (with or without spaces) or by pasting the full invite link. The meeting is checked before you continue. You enter a display name and the passcode (filled in automatically from invite links) in the preview window.
 - **Preview window (like Zoom's):** shown before every meeting, for the host too. Live camera with Audio and Video buttons, dropdowns to pick your microphone and camera (remembered for next time), and an "Always show this preview when joining" checkbox.
@@ -82,6 +87,13 @@ erDiagram
     users ||--o{ meetings : hosts
     users ||--o{ auth_sessions : "signed in as"
     users ||--|| user_settings : "has defaults"
+    chat_channels ||--o{ channel_members : has
+    users ||--o{ channel_members : "member of"
+    chat_channels ||--o{ channel_messages : has
+    users ||--o{ channel_messages : sends
+    users ||--o{ documents : owns
+    documents ||--o{ document_members : "shared with"
+    users ||--o{ document_members : "has access"
     users |o--o{ participants : "joins as (optional)"
     meetings ||--o{ participants : has
     meetings ||--o{ chat_messages : has
@@ -180,6 +192,44 @@ erDiagram
         bool default_mute_on_entry
         datetime updated_at
     }
+    chat_channels {
+        int id PK
+        string name "NULL for direct messages"
+        bool is_direct
+        bool is_default "the General channel"
+        int created_by FK
+        datetime created_at
+    }
+    channel_members {
+        int id PK
+        int channel_id FK
+        int user_id FK
+        int last_read_message_id "for unread counts"
+        datetime joined_at
+    }
+    channel_messages {
+        int id PK
+        int channel_id FK
+        int user_id FK
+        text content
+        datetime created_at
+    }
+    documents {
+        int id PK
+        int owner_id FK
+        string title
+        text content
+        int updated_by FK
+        datetime created_at
+        datetime updated_at
+    }
+    document_members {
+        int id PK
+        int document_id FK
+        int user_id FK
+        bool can_edit
+        datetime added_at
+    }
     reactions {
         int id PK
         int meeting_id FK
@@ -196,6 +246,10 @@ Design choices:
 - **`status` columns instead of deleting rows.** Leaving or being removed keeps the row, so history and chat authors stay intact.
 - **Chat links to the participant, not the user.** Guests can chat too, and the message shows the name used in that meeting.
 - **Schema changes on a live database.** New tables are created on startup by `create_all()`. New nullable columns on existing tables (like `participants.client_id`) are added by a small `add_missing_columns()` step in `database.py`, so the deployed SQLite file upgrades without losing data. A bigger project would use Alembic.
+- **Team Chat uses one `chat_channels` table for channels and direct messages** (`is_direct` tells them apart), so messages, members and unread logic are shared. A direct message has no name; the API shows the other person's name instead.
+- **Unread counts come from `channel_members.last_read_message_id`.** Message ids only grow, so "unread" is just "messages from other people with a higher id", one indexed count per conversation, with no per-message read table.
+- **Document owner lives on `documents.owner_id`; other people are in `document_members` with `can_edit`.** Unique indexes on `(channel_id, user_id)` and `(document_id, user_id)` stop duplicates. Documents you can't access return "not found", so ids can't be probed.
+- **Calendar needs no new table:** it reads `meetings` by `scheduled_start` (or `started_at` for instant meetings) within the visible week.
 - **Sessions are rows, not JWTs.** A database session can be revoked instantly (sign out, or "sign out other devices" after a password change) and costs one indexed lookup. Only token hashes are stored, so a copy of the database can't be used to sign in.
 - **`user_settings` vs `meeting_settings`.** User settings are personal defaults; each new meeting copies them into its own `meeting_settings` row, which the host can then change during that meeting without touching their defaults.
 - **`meeting_settings` is its own table (one row per meeting)** rather than nine more columns on `meetings`. The meetings table stays focused, settings can grow on their own, and because new tables are created on startup, the live database picked them up without a migration. Meetings created before settings existed get a default row the first time it's needed.
@@ -217,6 +271,17 @@ Interactive docs are at `/docs` on the backend.
 | GET / PATCH | `/api/users/me` | The signed in user / change name or colour |
 | POST | `/api/users/me/password` | Change password (signs out other devices) |
 | GET / PATCH | `/api/users/me/settings` | Personal meeting defaults |
+| GET | `/api/users/search?q=` | Find people with an account by name or email |
+| GET | `/api/meetings/calendar?start=&end=` | Your meetings in a date range |
+| GET / POST | `/api/chat/channels` | Your conversations (with unread counts) / create a channel |
+| POST | `/api/chat/direct` | Open (or start) a direct message with someone |
+| GET | `/api/chat/unread` | Total unread messages, for the tab badge |
+| GET / POST | `/api/chat/channels/{id}/messages?after_id=` | Read new messages / send one |
+| POST | `/api/chat/channels/{id}/read` | Mark a conversation as read |
+| POST / DELETE | `/api/chat/channels/{id}/members` (`/me`) | Add people / leave a channel |
+| GET / POST | `/api/docs` | Your documents and ones shared with you / create one |
+| GET / PATCH / DELETE | `/api/docs/{id}` | Read / save / delete (owner only) |
+| POST / DELETE | `/api/docs/{id}/members` (`/{user_id}`) | Share by email as editor or viewer / remove access |
 | GET | `/api/meetings/upcoming` | Scheduled meetings that haven't finished |
 | GET | `/api/meetings/recent` | Meetings that have started, newest first |
 | POST | `/api/meetings/instant` | Create an instant meeting |
@@ -253,15 +318,16 @@ backend/
     models.py          SQLAlchemy tables
     schemas.py         Pydantic request/response shapes
     dependencies.py    who is signed in (bearer token) and the participant key header
-    seed.py            sample users and meetings
-    routers/           thin HTTP layer: users, meetings, participants
-    services/          business rules: meetings, participants, codes, errors
-  tests/test_api.py
+    seed.py            sample users, meetings, chats and docs
+    routers/           thin HTTP layer: auth, users, meetings, participants, team_chat, documents
+    services/          business rules: auth, security, meetings, participants, team_chat, documents, codes, errors
+  tests/               test_api.py (accounts, meetings, rooms), test_workspace.py (chat, docs, calendar)
 frontend/
-  app/                 pages: / (home), /meetings, /join, /j/[code] (preview window), /meeting/[code] (room)
-  components/          ui/, layout/, home/, modals/, meetings/, room/
+  app/                 pages: / (home), /meetings, /chat, /calendar, /docs, /docs/[id], /settings,
+                       /signin, /signup, /join, /j/[code] (preview window), /meeting/[code] (room)
+  components/          ui/, layout/, home/, modals/, meetings/, room/, chat/, calendar/, docs/, settings/, auth/, providers/
   hooks/               useMeetings, useStartMeeting, useMeetingRoom, useLocalMedia, useGalleryLayout, ...
-  lib/                 api.ts (all backend calls), types.ts, format.ts, session.ts
+  lib/                 api.ts (all backend calls), types.ts, format.ts, session.ts, calendar.ts, docTemplates.ts
 ```
 
 Routers only deal with HTTP. All rules (who can join, passcode checks, host checks, when a meeting ends) live in `services/`, which raise plain Python errors that `main.py` turns into HTTP responses.
@@ -321,7 +387,8 @@ Open http://localhost:3000 and sign in with the demo account (`alex.johnson@exam
 - **Polling, not WebSockets.** A 2 second poll is simple, reliable on any host and good enough for this size. WebSockets would be the next step for scale.
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
-- **Placeholders:** Team Chat, Calendar, Docs, Search and Notifications show a "not part of this demo" message.
+- **Placeholders:** the top search box and the notifications bell show a "not part of this demo" message.
+- **Team Chat and Docs update by polling** (every few seconds), like the meeting room. Two people typing in the same document at the same moment: the last save wins; edits from others appear when you pause typing.
 - Times use the browser's time zone.
 - The Zoom wordmark is drawn as styled text, not the official logo file.
 

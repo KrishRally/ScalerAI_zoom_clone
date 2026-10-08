@@ -2,7 +2,11 @@
 
 import type {
   AuthResult,
+  Channel,
+  ChannelMessage,
   ChatMessage,
+  DocumentFull,
+  DocumentSummary,
   JoinInput,
   JoinResult,
   Meeting,
@@ -10,6 +14,7 @@ import type {
   MeetingSettings,
   Note,
   Participant,
+  Person,
   Reaction,
   RoomState,
   ScheduleInput,
@@ -105,7 +110,41 @@ export const api = {
   updateUserSettings: (changes: Partial<UserSettings>) =>
     request<UserSettings>("/api/users/me/settings", { method: "PATCH", body: JSON.stringify(changes) }),
 
+  searchPeople: (q: string) => request<Person[]>(`/api/users/search?q=${encodeURIComponent(q)}`),
+
+  // ---------- Team Chat ----------
+  channels: () => request<Channel[]>("/api/chat/channels"),
+  chatUnread: () => request<{ unread: number }>("/api/chat/unread"),
+  createChannel: (name: string, memberIds: number[]) =>
+    post<Channel>("/api/chat/channels", { name, member_ids: memberIds }),
+  openDirect: (userId: number) => post<Channel>("/api/chat/direct", { user_id: userId }),
+  addChannelMembers: (channelId: number, userIds: number[]) =>
+    post<Channel>(`/api/chat/channels/${channelId}/members`, { user_ids: userIds }),
+  leaveChannel: (channelId: number) =>
+    request<void>(`/api/chat/channels/${channelId}/members/me`, { method: "DELETE" }),
+  channelMessages: (channelId: number, afterId = 0) =>
+    request<ChannelMessage[]>(`/api/chat/channels/${channelId}/messages?after_id=${afterId}`),
+  sendChannelMessage: (channelId: number, content: string) =>
+    post<ChannelMessage>(`/api/chat/channels/${channelId}/messages`, { content }),
+  markChannelRead: (channelId: number) => post<void>(`/api/chat/channels/${channelId}/read`),
+
+  // ---------- Docs ----------
+  documents: () => request<DocumentSummary[]>("/api/docs"),
+  createDocument: (title: string, content: string) => post<DocumentFull>("/api/docs", { title, content }),
+  getDocument: (id: number) => request<DocumentFull>(`/api/docs/${id}`),
+  updateDocument: (id: number, changes: { title?: string; content?: string }) =>
+    request<DocumentFull>(`/api/docs/${id}`, { method: "PATCH", body: JSON.stringify(changes) }),
+  deleteDocument: (id: number) => request<void>(`/api/docs/${id}`, { method: "DELETE" }),
+  shareDocument: (id: number, email: string, canEdit: boolean) =>
+    post<DocumentFull>(`/api/docs/${id}/members`, { email, can_edit: canEdit }),
+  unshareDocument: (id: number, userId: number) =>
+    request<DocumentFull>(`/api/docs/${id}/members/${userId}`, { method: "DELETE" }),
+
   // ---------- Meetings ----------
+  calendar: (start: Date, end: Date) =>
+    request<Meeting[]>(
+      `/api/meetings/calendar?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+    ),
   upcomingMeetings: () => request<Meeting[]>("/api/meetings/upcoming"),
   recentMeetings: () => request<Meeting[]>("/api/meetings/recent"),
   getMeeting: (c: string) => request<Meeting>(`/api/meetings/${code(c)}`),

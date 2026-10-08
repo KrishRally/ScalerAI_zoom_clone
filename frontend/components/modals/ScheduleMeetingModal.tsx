@@ -14,6 +14,8 @@ interface Props {
   onSaved: (meeting: Meeting) => void;
   /** Pass a meeting to edit it instead of creating a new one. */
   editing?: Meeting | null;
+  /** Start time to suggest for a new meeting (for example, a slot clicked on the calendar). */
+  initialStart?: Date | null;
 }
 
 // Zoom offers start times in 30 minute steps.
@@ -39,7 +41,7 @@ function nextHalfHour(): Date {
 
 const timeZone = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "Local time";
 
-export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }: Props) {
+export default function ScheduleMeetingModal({ open, onClose, onSaved, editing, initialStart }: Props) {
   const { user, settings } = useAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -57,7 +59,7 @@ export default function ScheduleMeetingModal({ open, onClose, onSaved, editing }
   // Fill the form each time it opens.
   useEffect(() => {
     if (!open) return;
-    const start = editing?.scheduled_start ? new Date(editing.scheduled_start) : nextHalfHour();
+    const start = editing?.scheduled_start ? new Date(editing.scheduled_start) : initialStart ?? nextHalfHour();
     const duration = editing?.duration_minutes ?? 60;
     setTitle(editing?.title ?? (user ? `${user.name}'s Zoom Meeting` : "My Meeting"));
     setDescription(editing?.description ?? "");

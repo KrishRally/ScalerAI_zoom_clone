@@ -85,7 +85,7 @@ function Dashboard() {
                 }
               />
               <ActionTile label="Join" icon={Plus} onClick={() => setJoinOpen(true)} />
-              <ActionTile label="Schedule" icon={CalendarDays} onClick={openSchedule} />
+              <ActionTile label="Schedule" icon={CalendarDays} onClick={() => openSchedule()} />
               <ActionTile
                 label="Share screen"
                 icon={MonitorUp}
@@ -111,7 +111,7 @@ function Dashboard() {
               ) : upcoming.length === 0 ? (
                 <EmptyState
                   title="No upcoming meetings"
-                  action={<button className="btn-primary mt-3" onClick={openSchedule}>Schedule a meeting</button>}
+                  action={<button className="btn-primary mt-3" onClick={() => openSchedule()}>Schedule a meeting</button>}
                 />
               ) : (
                 <ul className="divide-y divide-zoom-border">

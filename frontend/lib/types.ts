@@ -137,3 +137,48 @@ export interface JoinInput {
   is_video_on?: boolean;
   client_id?: string;
 }
+
+// ---------- People, Team Chat, Docs ----------
+
+export interface Person {
+  id: number;
+  name: string;
+  email: string;
+  avatar_color: string;
+}
+
+export interface ChannelMessage {
+  id: number;
+  channel_id: number;
+  sender: Person;
+  content: string;
+  created_at: string;
+}
+
+export interface Channel {
+  id: number;
+  /** For direct messages, the other person's name. */
+  name: string;
+  is_direct: boolean;
+  is_default: boolean;
+  members: Person[];
+  unread_count: number;
+  last_message: ChannelMessage | null;
+}
+
+export interface DocumentSummary {
+  id: number;
+  title: string;
+  snippet: string;
+  owner: Person;
+  is_owner: boolean;
+  can_edit: boolean;
+  shared: boolean;
+  updated_at: string;
+  updated_by_name: string | null;
+}
+
+export interface DocumentFull extends DocumentSummary {
+  content: string;
+  members: { user: Person; can_edit: boolean }[];
+}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bell,
   CalendarDays,
@@ -18,15 +18,28 @@ import Avatar from "@/components/ui/Avatar";
 import ZoomLogo from "@/components/ui/ZoomLogo";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
+import { api } from "@/lib/api";
 
-// Only Home and Meetings are real pages. The rest are placeholders, like in the brief.
 const TABS = [
   { href: "/", label: "Home", icon: Home },
-  { href: null, label: "Team Chat", icon: MessageSquare },
+  { href: "/chat", label: "Team Chat", icon: MessageSquare },
   { href: "/meetings", label: "Meetings", icon: Video },
-  { href: null, label: "Calendar", icon: CalendarDays },
-  { href: null, label: "Docs", icon: FileText },
+  { href: "/calendar", label: "Calendar", icon: CalendarDays },
+  { href: "/docs", label: "Docs", icon: FileText },
 ];
+
+/** Unread Team Chat messages, checked every 15 seconds while signed in. */
+function useChatUnread(enabled: boolean) {
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const check = () => api.chatUnread().then((r) => setUnread(r.unread)).catch(() => {});
+    check();
+    const id = setInterval(check, 15000);
+    return () => clearInterval(id);
+  }, [enabled]);
+  return unread;
+}
 
 export default function TopNav() {
   const pathname = usePathname();
@@ -34,6 +47,8 @@ export default function TopNav() {
   const router = useRouter();
   const toast = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The chat page shows its own counts, so don't poll from here while on it.
+  const chatUnread = useChatUnread(!!user && !pathname.startsWith("/chat"));
 
   const comingSoon = (label: string) => toast(`${label} is not part of this demo`, "info");
 
@@ -46,25 +61,26 @@ export default function TopNav() {
 
         <nav className="no-scrollbar ml-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:ml-6 md:flex-none">
           {TABS.map(({ href, label, icon: Icon }) => {
-            const active = href !== null && (href === "/" ? pathname === "/" : pathname.startsWith(href));
-            const className = `group relative flex shrink-0 flex-col items-center gap-0.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition-colors lg:px-3 ${
-              active ? "text-zoom-blue" : "text-zoom-muted hover:bg-zoom-surface hover:text-zoom-ink"
-            }`;
-            const content = (
-              <>
+            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            const badge = href === "/chat" && chatUnread > 0 && !active;
+            return (
+              <Link
+                key={label}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`group relative flex shrink-0 flex-col items-center gap-0.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition-colors lg:px-3 ${
+                  active ? "text-zoom-blue" : "text-zoom-muted hover:bg-zoom-surface hover:text-zoom-ink"
+                }`}
+              >
                 <Icon className="h-5 w-5" strokeWidth={active ? 2.4 : 2} />
                 <span className="hidden sm:block">{label}</span>
+                {badge && (
+                  <span className="absolute right-1 top-0 min-w-4 rounded-full bg-zoom-red px-1 text-center text-[10px] font-bold leading-4 text-white">
+                    {chatUnread > 99 ? "99+" : chatUnread}
+                  </span>
+                )}
                 {active && <span className="absolute -bottom-[9px] left-2 right-2 h-[3px] rounded-full bg-zoom-blue" />}
-              </>
-            );
-            return href ? (
-              <Link key={label} href={href} className={className} aria-current={active ? "page" : undefined}>
-                {content}
               </Link>
-            ) : (
-              <button key={label} className={className} onClick={() => comingSoon(label)}>
-                {content}
-              </button>
             );
           })}
         </nav>
