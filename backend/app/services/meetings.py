@@ -22,7 +22,19 @@ from app.services.codes import (
     generate_passcode,
     normalize_meeting_code,
 )
+from app.services.auth import get_user_settings
 from app.services.errors import BadRequest, Forbidden, NotFound
+
+
+def _settings_from_defaults(
+    db: Session, host: User, waiting_room: bool | None = None, mute_on_entry: bool | None = None
+) -> MeetingSettings:
+    """New meetings start from the host's defaults on the Settings page."""
+    defaults = get_user_settings(db, host)
+    return MeetingSettings(
+        waiting_room=defaults.default_waiting_room if waiting_room is None else waiting_room,
+        mute_on_entry=defaults.default_mute_on_entry if mute_on_entry is None else mute_on_entry,
+    )
 
 
 def get_settings(db: Session, meeting: Meeting) -> MeetingSettings:
@@ -87,7 +99,7 @@ def create_instant_meeting(
         status=MeetingStatus.scheduled,  # becomes "live" when the host joins
         passcode=generate_passcode(),
         duration_minutes=60,
-        settings=MeetingSettings(),
+        settings=_settings_from_defaults(db, host),
     )
     db.add(meeting)
     db.commit()
@@ -111,9 +123,7 @@ def create_scheduled_meeting(
         passcode=data.passcode or generate_passcode(),
         scheduled_start=data.scheduled_start,
         duration_minutes=data.duration_minutes,
-        settings=MeetingSettings(
-            waiting_room=data.waiting_room, mute_on_entry=data.mute_on_entry
-        ),
+        settings=_settings_from_defaults(db, host, data.waiting_room, data.mute_on_entry),
     )
     db.add(meeting)
     db.commit()

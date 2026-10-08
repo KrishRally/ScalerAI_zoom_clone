@@ -6,6 +6,8 @@
     meetings ──1 meeting_settings      (host rules for the meeting)
     meetings ──< meeting_notes         (private notes, one per person per meeting)
     meetings ──< reactions >── participants
+    users ──< auth_sessions            (one row per signed in browser)
+    users ──1 user_settings            (personal defaults)
 
 All times are stored in UTC.
 """
@@ -65,9 +67,14 @@ class User(Base):
     avatar_color: Mapped[str] = mapped_column(String(7), default="#0E71EB")
     # Every Zoom user has a fixed Personal Meeting ID (PMI).
     personal_meeting_id: Mapped[str] = mapped_column(String(11), unique=True)
+    # Salted PBKDF2 hash, never the password itself. See services/security.py.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     hosted_meetings: Mapped[list["Meeting"]] = relationship(back_populates="host")
+    settings: Mapped["UserSettings | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class Meeting(Base):
@@ -134,6 +141,9 @@ class Participant(Base):
     # A random id each browser tab keeps, so rejoining from the same tab
     # replaces the old entry instead of showing the person twice.
     client_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Hash of the secret key given to this participant when they joined.
+    # Every action they take in the room must come with that key.
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     left_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Updated every time the participant's browser checks in.
@@ -235,3 +245,36 @@ class Reaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (Index("ix_reactions_meeting_created", "meeting_id", "created_at"),)
+
+
+class AuthSession(Base):
+    """A signed in browser. Signing out deletes the row, so the token stops working."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Only a hash of the token is stored, so a leaked database can't be used to sign in.
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+    user: Mapped[User] = relationship()
+
+
+class UserSettings(Base):
+    """Personal defaults from the Settings page. One row per user."""
+
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    start_with_video: Mapped[bool] = mapped_column(Boolean, default=True)
+    join_muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_preview: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Used for new meetings this user creates.
+    default_waiting_room: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_mute_on_entry: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="settings")

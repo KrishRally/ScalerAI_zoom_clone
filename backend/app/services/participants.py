@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.services.errors import BadRequest, Forbidden, NotFound
 from app.services.meetings import end_meeting, get_settings, to_meeting_out
+from app.services.security import hash_token, new_token
 
 # How long a reaction stays on screen.
 REACTION_SECONDS = 6
@@ -30,6 +31,18 @@ def get_participant(db: Session, participant_id: int) -> Participant:
     participant = db.get(Participant, participant_id)
     if participant is None:
         raise NotFound("Participant not found")
+    return participant
+
+
+def authenticate(db: Session, participant_id: int, token: str | None) -> Participant:
+    """Check the secret key sent with a request belongs to this participant.
+
+    Participant ids are just numbers anyone could guess, so every action in a
+    room (including host controls) must also carry the key given at join time.
+    """
+    participant = get_participant(db, participant_id)
+    if not token or not participant.token_hash or participant.token_hash != hash_token(token):
+        raise Forbidden("You are not allowed to act as this participant")
     return participant
 
 
@@ -79,8 +92,14 @@ def _after_someone_left(db: Session, meeting: Meeting) -> None:
 # ---------- Joining ----------
 
 
-def join_meeting(db: Session, meeting: Meeting, data: schemas.JoinRequest) -> Participant:
-    is_owner = data.user_id is not None and data.user_id == meeting.host_id
+def join_meeting(
+    db: Session, meeting: Meeting, data: schemas.JoinRequest, user: User | None
+) -> schemas.JoinResult:
+    """Join a meeting. `user` is the signed in account, or None for guests.
+
+    Only the meeting's owner, proven by their sign in, becomes host.
+    """
+    is_owner = user is not None and user.id == meeting.host_id
     settings = get_settings(db, meeting)
 
     if meeting.status == MeetingStatus.ended and not is_owner:
@@ -120,9 +139,11 @@ def join_meeting(db: Session, meeting: Meeting, data: schemas.JoinRequest) -> Pa
         if not settings.allow_video:
             is_video_on = False
 
+    token, token_hash = new_token()
     participant = Participant(
         meeting_id=meeting.id,
-        user_id=data.user_id,
+        user_id=user.id if user else None,
+        token_hash=token_hash,
         display_name=data.display_name,
         role=ParticipantRole.host if (is_owner or was_host) else ParticipantRole.attendee,
         status=ParticipantStatus.waiting if goes_to_waiting_room else ParticipantStatus.in_meeting,
@@ -135,7 +156,10 @@ def join_meeting(db: Session, meeting: Meeting, data: schemas.JoinRequest) -> Pa
     db.add(participant)
     db.commit()
     db.refresh(participant)
-    return participant
+    return schemas.JoinResult(
+        **schemas.ParticipantOut.model_validate(participant).model_dump(),
+        participant_token=token,
+    )
 
 
 def _replace_previous_entries(

@@ -1,5 +1,8 @@
 """Sample data so the dashboard is not empty on first run.
 
+The demo account (alex.johnson@example.com, password from DEMO_PASSWORD) lets
+reviewers sign in straight away. Anyone can also sign up with their own email.
+
 Runs on startup but only fills an empty database, so it never overwrites
 meetings people have created. Times are relative to "now" so the
 upcoming meetings are always in the future.
@@ -11,6 +14,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import DEMO_PASSWORD
 from app.models import (
     ChatMessage,
     Meeting,
@@ -27,6 +31,7 @@ from app.services.codes import (
     generate_passcode,
     generate_personal_meeting_id,
 )
+from app.services.security import hash_password
 
 DEFAULT_USER_EMAIL = "alex.johnson@example.com"
 DEFAULT_USER_NAME = os.getenv("DEFAULT_USER_NAME", "Alex Johnson")
@@ -56,6 +61,14 @@ _RECENT = [
 ]
 
 
+def ensure_demo_password(db: Session) -> None:
+    """Databases seeded before sign in existed have a demo user with no password. Give it one."""
+    demo = db.scalar(select(User).where(User.email == DEFAULT_USER_EMAIL))
+    if demo is not None and not demo.password_hash:
+        demo.password_hash = hash_password(DEMO_PASSWORD)
+        db.commit()
+
+
 def seed_database(db: Session) -> None:
     if db.scalar(select(User.id).limit(1)) is not None:
         return  # already seeded
@@ -63,6 +76,7 @@ def seed_database(db: Session) -> None:
     me = User(
         name=DEFAULT_USER_NAME,
         email=DEFAULT_USER_EMAIL,
+        password_hash=hash_password(DEMO_PASSWORD),
         avatar_color="#0E71EB",
         personal_meeting_id=generate_personal_meeting_id(),
     )

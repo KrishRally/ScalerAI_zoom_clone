@@ -16,6 +16,10 @@ class BadRequest(ServiceError):
     status_code = 400
 
 
+class Unauthorized(ServiceError):
+    status_code = 401
+
+
 class Forbidden(ServiceError):
     status_code = 403
 

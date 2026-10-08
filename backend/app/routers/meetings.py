@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_optional_user, participant_token
 from app.models import User
 from app.services import meetings as meeting_service
 from app.services import participants as participant_service
@@ -116,12 +116,18 @@ def delete_meeting(
 
 @router.post(
     "/{code}/join",
-    response_model=schemas.ParticipantOut,
+    response_model=schemas.JoinResult,
     status_code=status.HTTP_201_CREATED,
 )
-def join_meeting(code: str, data: schemas.JoinRequest, db: Session = Depends(get_db)):
+def join_meeting(
+    code: str,
+    data: schemas.JoinRequest,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Guests can join without an account. Signed in owners join as host."""
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.join_meeting(db, meeting, data)
+    return participant_service.join_meeting(db, meeting, data, user)
 
 
 @router.get("/{code}/state", response_model=schemas.RoomState)
@@ -130,21 +136,34 @@ def room_state(
     participant_id: int,
     after_message_id: int = 0,
     db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
 ):
     meeting = meeting_service.get_meeting(db, code)
-    participant = participant_service.get_participant(db, participant_id)
+    participant = participant_service.authenticate(db, participant_id, token)
     return participant_service.room_state(db, meeting, participant, after_message_id)
 
 
 @router.post("/{code}/mute-all")
-def mute_all(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+def mute_all(
+    code: str,
+    data: schemas.HostAction,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
     muted = participant_service.mute_all(db, meeting, data.requester_id)
     return {"muted": muted}
 
 
 @router.post("/{code}/end", response_model=schemas.MeetingOut)
-def end_meeting(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+def end_meeting(
+    code: str,
+    data: schemas.HostAction,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
     meeting = participant_service.end_for_all(db, meeting, data.requester_id)
     return meeting_service.to_meeting_out(db, meeting)
@@ -156,8 +175,12 @@ def end_meeting(code: str, data: schemas.HostAction, db: Session = Depends(get_d
     status_code=status.HTTP_201_CREATED,
 )
 def send_message(
-    code: str, data: schemas.ChatMessageCreate, db: Session = Depends(get_db)
+    code: str,
+    data: schemas.ChatMessageCreate,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
 ):
+    participant_service.authenticate(db, data.participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
     message = participant_service.send_message(db, meeting, data)
     return participant_service.to_message_out(message)
@@ -169,8 +192,12 @@ def send_message(
     status_code=status.HTTP_201_CREATED,
 )
 def send_reaction(
-    code: str, data: schemas.ReactionCreate, db: Session = Depends(get_db)
+    code: str,
+    data: schemas.ReactionCreate,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
 ):
+    participant_service.authenticate(db, data.participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
     r = participant_service.send_reaction(db, meeting, data)
     return schemas.ReactionOut(id=r.id, participant_id=r.participant_id, emoji=r.emoji)
@@ -181,20 +208,36 @@ def send_reaction(
 
 @router.patch("/{code}/settings", response_model=schemas.SettingsOut)
 def update_settings(
-    code: str, data: schemas.SettingsUpdate, db: Session = Depends(get_db)
+    code: str,
+    data: schemas.SettingsUpdate,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
 ):
+    participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
     return participant_service.update_settings(db, meeting, data)
 
 
 @router.post("/{code}/suspend", response_model=schemas.SettingsOut)
-def suspend(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+def suspend(
+    code: str,
+    data: schemas.HostAction,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
     return participant_service.suspend_activities(db, meeting, data.requester_id)
 
 
 @router.post("/{code}/admit-all")
-def admit_all(code: str, data: schemas.HostAction, db: Session = Depends(get_db)):
+def admit_all(
+    code: str,
+    data: schemas.HostAction,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    participant_service.authenticate(db, data.requester_id, token)
     meeting = meeting_service.get_meeting(db, code)
     return {"admitted": participant_service.admit_all(db, meeting, data.requester_id)}
 
@@ -203,13 +246,25 @@ def admit_all(code: str, data: schemas.HostAction, db: Session = Depends(get_db)
 
 
 @router.get("/{code}/notes", response_model=schemas.NoteOut)
-def get_notes(code: str, participant_id: int, db: Session = Depends(get_db)):
+def get_notes(
+    code: str,
+    participant_id: int,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    participant_service.authenticate(db, participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
     return participant_service.get_note(db, meeting, participant_id)
 
 
 @router.put("/{code}/notes", response_model=schemas.NoteOut)
-def save_notes(code: str, data: schemas.NoteSave, db: Session = Depends(get_db)):
+def save_notes(
+    code: str,
+    data: schemas.NoteSave,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(participant_token),
+):
+    participant_service.authenticate(db, data.participant_id, token)
     meeting = meeting_service.get_meeting(db, code)
     return participant_service.save_note(db, meeting, data)
 

@@ -22,3 +22,12 @@ CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
 # A participant who has not checked in for this many seconds is treated as gone
 # (for example they closed the tab without clicking Leave).
 PARTICIPANT_TIMEOUT_SECONDS = int(os.getenv("PARTICIPANT_TIMEOUT_SECONDS", "30"))
+
+# Password hashing strength (PBKDF2 rounds). Tests lower this to stay fast.
+PASSWORD_HASH_ITERATIONS = int(os.getenv("PASSWORD_HASH_ITERATIONS", "600000"))
+
+# How long a sign in lasts before the user must sign in again.
+SESSION_DAYS = int(os.getenv("SESSION_DAYS", "30"))
+
+# Password for the seeded demo account, so reviewers can sign in straight away.
+DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "zoomdemo123")

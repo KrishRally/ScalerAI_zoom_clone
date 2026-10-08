@@ -1,388 +1,464 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 
 def _future(hours=3):
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
 
 
-def _start_instant(client):
-    me = client.get("/api/users/me").json()
-    meeting = client.post("/api/meetings/instant").json()
-    host = client.post(
+def pt(participant):
+    """Headers proving we are this participant."""
+    return {"X-Participant-Token": participant["participant_token"]}
+
+
+@pytest.fixture
+def start_instant(client, auth):
+    """Create an instant meeting and join it as the signed in host."""
+
+    def _start():
+        meeting = client.post("/api/meetings/instant", headers=auth).json()
+        host = client.post(
+            f"/api/meetings/{meeting['meeting_code']}/join",
+            json={"display_name": "Alex Johnson"},
+            headers=auth,
+        ).json()
+        return meeting, host
+
+    return _start
+
+
+def _guest(client, meeting, name="Guest", **extra):
+    return client.post(
         f"/api/meetings/{meeting['meeting_code']}/join",
-        json={"display_name": me["name"], "user_id": me["id"]},
+        json={"display_name": name, "passcode": meeting["passcode"], **extra},
+    )
+
+
+def _state(client, code, participant):
+    return client.get(
+        f"/api/meetings/{code}/state",
+        params={"participant_id": participant["id"]},
+        headers=pt(participant),
     ).json()
-    return meeting, host
 
 
-def test_seeded_dashboard(client):
-    assert client.get("/api/users/me").status_code == 200
-    upcoming = client.get("/api/meetings/upcoming").json()
-    recent = client.get("/api/meetings/recent").json()
+def _settings(client, code, host, **changes):
+    return client.patch(
+        f"/api/meetings/{code}/settings",
+        json={"requester_id": host["id"], **changes},
+        headers=pt(host),
+    )
+
+
+def _host_action(client, path, host, **body):
+    return client.post(path, json={"requester_id": host["id"], **body}, headers=pt(host))
+
+
+# ---------- Accounts ----------
+
+
+def test_sign_up_sign_in_and_sign_out(client):
+    res = client.post(
+        "/api/auth/signup",
+        json={"name": "  Krish   Rally ", "email": "Krish.Rally@Gmail.com", "password": "secret123"},
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["user"]["name"] == "Krish Rally"
+    assert body["user"]["email"] == "krish.rally@gmail.com"  # stored in lower case
+    headers = {"Authorization": f"Bearer {body['token']}"}
+    assert client.get("/api/users/me", headers=headers).json()["email"] == "krish.rally@gmail.com"
+
+    # Same email again, any capitalisation, is refused.
+    again = client.post(
+        "/api/auth/signup",
+        json={"name": "X", "email": "KRISH.RALLY@gmail.com", "password": "secret123"},
+    )
+    assert again.status_code == 409
+
+    # Signing in works with any capitalisation.
+    login = client.post("/api/auth/login", json={"email": "krish.rally@GMAIL.com", "password": "secret123"})
+    assert login.status_code == 200
+
+    # Signing out kills that token.
+    client.post("/api/auth/logout", headers=headers)
+    assert client.get("/api/users/me", headers=headers).status_code == 401
+
+
+def test_sign_up_validation(client):
+    bad_email = client.post("/api/auth/signup", json={"name": "A", "email": "not-an-email", "password": "secret123"})
+    short_pw = client.post("/api/auth/signup", json={"name": "A", "email": "a@example.com", "password": "short"})
+    assert bad_email.status_code == 422
+    assert short_pw.status_code == 422
+
+
+def test_wrong_password_and_unknown_email_look_the_same(client):
+    wrong = client.post("/api/auth/login", json={"email": "alex.johnson@example.com", "password": "nope"})
+    unknown = client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "nope"})
+    assert wrong.status_code == unknown.status_code == 401
+    assert wrong.json()["detail"] == unknown.json()["detail"]
+
+
+def test_dashboard_needs_sign_in(client):
+    assert client.get("/api/users/me").status_code == 401
+    assert client.get("/api/meetings/upcoming").status_code == 401
+    assert client.post("/api/meetings/instant").status_code == 401
+
+
+def test_passwords_are_hashed(client):
+    from app.database import SessionLocal
+    from app.models import User
+
+    client.post("/api/auth/signup", json={"name": "H", "email": "hash@example.com", "password": "secret123"})
+    with SessionLocal() as db:
+        stored = db.query(User).filter_by(email="hash@example.com").one().password_hash
+    assert "secret123" not in stored and stored.startswith("pbkdf2_sha256$")
+
+
+def test_profile_password_and_settings(client):
+    token = client.post(
+        "/api/auth/signup", json={"name": "Old", "email": "p@example.com", "password": "secret123"}
+    ).json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+    assert client.patch("/api/users/me", json={"name": "New Name"}, headers=h).json()["name"] == "New Name"
+
+    assert client.post(
+        "/api/users/me/password", json={"current_password": "wrong", "new_password": "newsecret1"}, headers=h
+    ).status_code == 400
+    assert client.post(
+        "/api/users/me/password", json={"current_password": "secret123", "new_password": "newsecret1"}, headers=h
+    ).status_code == 204
+    assert client.post("/api/auth/login", json={"email": "p@example.com", "password": "newsecret1"}).status_code == 200
+
+    settings = client.patch(
+        "/api/users/me/settings", json={"default_waiting_room": True, "start_with_video": False}, headers=h
+    ).json()
+    assert settings["default_waiting_room"] is True and settings["start_with_video"] is False
+    # New meetings pick up the defaults.
+    meeting = client.post("/api/meetings/instant", headers=h).json()
+    assert meeting["settings"]["waiting_room"] is True
+
+
+def test_each_user_sees_only_their_meetings(client, auth):
+    token = client.post(
+        "/api/auth/signup", json={"name": "Solo", "email": "solo@example.com", "password": "secret123"}
+    ).json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/meetings/upcoming", headers=h).json() == []
+    assert len(client.get("/api/meetings/upcoming", headers=auth).json()) >= 5
+
+
+# ---------- Meetings ----------
+
+
+def test_seeded_dashboard(client, auth):
+    upcoming = client.get("/api/meetings/upcoming", headers=auth).json()
+    recent = client.get("/api/meetings/recent", headers=auth).json()
     assert len(upcoming) >= 5
     assert len(recent) >= 4
     starts = [m["scheduled_start"] for m in upcoming]
     assert starts == sorted(starts)
 
 
-def test_instant_meeting_has_code_and_link(client):
-    meeting = client.post("/api/meetings/instant").json()
+def test_instant_meeting_has_code_and_link(client, auth):
+    meeting = client.post("/api/meetings/instant", headers=auth).json()
     code = meeting["meeting_code"]
     assert len(code) == 10 and code.isdigit()
-    assert meeting["invite_link"] == (
-        f"http://testserver-frontend/j/{code}?pwd={meeting['passcode']}"
-    )
+    assert meeting["invite_link"] == f"http://testserver-frontend/j/{code}?pwd={meeting['passcode']}"
 
 
-def test_schedule_meeting_shows_in_upcoming(client):
+def test_schedule_meeting_shows_in_upcoming(client, auth):
     res = client.post(
         "/api/meetings/scheduled",
-        json={
-            "title": "Planning",
-            "description": "Q4",
-            "scheduled_start": _future(),
-            "duration_minutes": 45,
-        },
+        json={"title": "Planning", "description": "Q4", "scheduled_start": _future(), "duration_minutes": 45},
+        headers=auth,
     )
     assert res.status_code == 201
     code = res.json()["meeting_code"]
-    assert code in [m["meeting_code"] for m in client.get("/api/meetings/upcoming").json()]
+    upcoming = client.get("/api/meetings/upcoming", headers=auth).json()
+    assert code in [m["meeting_code"] for m in upcoming]
 
 
-def test_schedule_rejects_past_and_bad_input(client):
+def test_schedule_rejects_past_and_bad_input(client, auth):
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     assert client.post(
-        "/api/meetings/scheduled", json={"title": "x", "scheduled_start": past}
+        "/api/meetings/scheduled", json={"title": "x", "scheduled_start": past}, headers=auth
     ).status_code == 400
     assert client.post(
-        "/api/meetings/scheduled", json={"title": "  ", "scheduled_start": _future()}
+        "/api/meetings/scheduled", json={"title": "  ", "scheduled_start": _future()}, headers=auth
     ).status_code == 422
 
 
-def test_lookup_accepts_spaces_and_links(client):
-    meeting = client.post("/api/meetings/instant").json()
+def test_lookup_accepts_spaces_and_links(client, auth):
+    meeting = client.post("/api/meetings/instant", headers=auth).json()
     code = meeting["meeting_code"]
     spaced = f"{code[:3]} {code[3:7]} {code[7:]}"
     assert client.get("/api/meetings/lookup", params={"q": spaced}).status_code == 200
-    assert client.get(
-        "/api/meetings/lookup", params={"q": meeting["invite_link"]}
-    ).status_code == 200
+    assert client.get("/api/meetings/lookup", params={"q": meeting["invite_link"]}).status_code == 200
     assert client.get("/api/meetings/lookup", params={"q": "1234567890"}).status_code == 404
     assert client.get("/api/meetings/lookup", params={"q": "hello"}).status_code == 400
 
 
-def test_guest_join_needs_passcode(client):
-    meeting = client.post("/api/meetings/instant").json()
-    url = f"/api/meetings/{meeting['meeting_code']}/join"
-    assert client.post(url, json={"display_name": "Guest"}).status_code == 403
-    ok = client.post(url, json={"display_name": "Guest", "passcode": meeting["passcode"]})
-    assert ok.status_code == 201
-    assert ok.json()["role"] == "attendee"
-
-
-def test_host_controls(client):
-    meeting, host = _start_instant(client)
-    code = meeting["meeting_code"]
-    assert host["role"] == "host"
-    guest = client.post(
-        f"/api/meetings/{code}/join",
-        json={"display_name": "Guest", "passcode": meeting["passcode"]},
-    ).json()
-
-    # A guest cannot use host controls.
-    assert client.post(
-        f"/api/meetings/{code}/mute-all", json={"requester_id": guest["id"]}
-    ).status_code == 403
-
-    assert client.post(
-        f"/api/meetings/{code}/mute-all", json={"requester_id": host["id"]}
-    ).json() == {"muted": 1}
-
-    assert client.post(
-        f"/api/participants/{guest['id']}/remove", json={"requester_id": host["id"]}
-    ).status_code == 204
-    state = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": guest["id"]}
-    ).json()
-    assert state["me"]["status"] == "removed"
-    host_view = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": host["id"]}
-    ).json()
-    assert [p["id"] for p in host_view["participants"]] == [host["id"]]
-
-
-def test_chat_and_end_meeting(client):
-    meeting, host = _start_instant(client)
-    code = meeting["meeting_code"]
-    client.post(
-        f"/api/meetings/{code}/messages",
-        json={"participant_id": host["id"], "content": "Hello"},
-    )
-    state = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": host["id"]}
-    ).json()
-    assert [m["content"] for m in state["messages"]] == ["Hello"]
-    assert state["meeting"]["status"] == "live"
-
-    ended = client.post(f"/api/meetings/{code}/end", json={"requester_id": host["id"]})
-    assert ended.json()["status"] == "ended"
-    assert code in [m["meeting_code"] for m in client.get("/api/meetings/recent").json()]
-    # Guests cannot join an ended meeting.
-    assert client.post(
-        f"/api/meetings/{code}/join",
-        json={"display_name": "Late", "passcode": meeting["passcode"]},
-    ).status_code == 400
-
-
-def test_last_person_leaving_ends_meeting(client):
-    meeting, host = _start_instant(client)
-    client.post(f"/api/participants/{host['id']}/leave")
-    lookup = client.get(
-        "/api/meetings/lookup", params={"q": meeting["meeting_code"]}
-    ).json()
-    assert lookup["status"] == "ended"
-
-
-def test_stale_participants_are_expired(client, monkeypatch):
-    from app.services import participants as participant_service
-
-    meeting, host = _start_instant(client)
-    # Pretend the timeout is zero, as if the host closed the tab long ago.
-    monkeypatch.setattr(participant_service, "PARTICIPANT_TIMEOUT_SECONDS", -1)
-    client.get("/api/meetings/upcoming")
-    lookup = client.get(
-        "/api/meetings/lookup", params={"q": meeting["meeting_code"]}
-    ).json()
-    assert lookup["status"] == "ended"
-
-
-
-# ---------- Host settings, waiting room, notes, reactions ----------
-
-
-def _guest(client, meeting, name="Guest"):
-    return client.post(
-        f"/api/meetings/{meeting['meeting_code']}/join",
-        json={"display_name": name, "passcode": meeting["passcode"]},
-    )
-
-
-def _settings(client, code, host_id, **changes):
-    return client.patch(
-        f"/api/meetings/{code}/settings", json={"requester_id": host_id, **changes}
-    )
-
-
-def test_new_meetings_have_default_settings(client):
-    meeting = client.post("/api/meetings/instant").json()
-    assert meeting["settings"]["allow_chat"] is True
-    assert meeting["settings"]["waiting_room"] is False
-
-
-def test_schedule_with_options(client):
+def test_schedule_with_options(client, auth):
     meeting = client.post(
         "/api/meetings/scheduled",
-        json={
-            "title": "Secure call",
-            "scheduled_start": _future(),
-            "waiting_room": True,
-            "mute_on_entry": True,
-        },
+        json={"title": "Secure", "scheduled_start": _future(), "waiting_room": True, "mute_on_entry": True},
+        headers=auth,
     ).json()
     assert meeting["settings"]["waiting_room"] is True
     assert meeting["settings"]["mute_on_entry"] is True
 
 
-def test_only_host_can_change_settings(client):
-    meeting, host = _start_instant(client)
+# ---------- Joining and identity ----------
+
+
+def test_guest_join_needs_passcode(client, auth):
+    meeting = client.post("/api/meetings/instant", headers=auth).json()
+    url = f"/api/meetings/{meeting['meeting_code']}/join"
+    assert client.post(url, json={"display_name": "Guest"}).status_code == 403
+    ok = client.post(url, json={"display_name": "Guest", "passcode": meeting["passcode"]})
+    assert ok.status_code == 201
+    assert ok.json()["role"] == "attendee"
+    assert ok.json()["participant_token"]
+
+
+def test_only_the_signed_in_owner_becomes_host(client, auth):
+    meeting = client.post("/api/meetings/instant", headers=auth).json()
+    url = f"/api/meetings/{meeting['meeting_code']}/join"
+    # Claiming to be the host in the body does nothing any more.
+    fake = client.post(url, json={"display_name": "Faker", "passcode": meeting["passcode"], "user_id": 1})
+    assert fake.json()["role"] == "attendee"
+    # Another signed in user is just an attendee too.
+    other = client.post(
+        "/api/auth/signup", json={"name": "Other", "email": "other@example.com", "password": "secret123"}
+    ).json()["token"]
+    res = client.post(
+        url, json={"display_name": "Other", "passcode": meeting["passcode"]}, headers={"Authorization": f"Bearer {other}"}
+    )
+    assert res.json()["role"] == "attendee"
+    real = client.post(url, json={"display_name": "Alex"}, headers=auth)
+    assert real.json()["role"] == "host"
+
+
+def test_room_actions_need_the_participant_key(client, start_instant):
+    meeting, host = start_instant()
+    code = meeting["meeting_code"]
+    guest = _guest(client, meeting).json()
+    # Knowing the host's id is not enough without their key.
+    res = client.post(f"/api/meetings/{code}/mute-all", json={"requester_id": host["id"]}, headers=pt(guest))
+    assert res.status_code == 403
+    no_key = client.get(f"/api/meetings/{code}/state", params={"participant_id": host["id"]})
+    assert no_key.status_code == 403
+    assert client.post(f"/api/participants/{host['id']}/leave").status_code == 403
+
+
+# ---------- Host controls ----------
+
+
+def test_host_controls(client, start_instant):
+    meeting, host = start_instant()
+    code = meeting["meeting_code"]
+    assert host["role"] == "host"
+    guest = _guest(client, meeting).json()
+
+    # A guest cannot use host controls, even with their own valid key.
+    assert _host_action(client, f"/api/meetings/{code}/mute-all", guest).status_code == 403
+    assert _host_action(client, f"/api/meetings/{code}/mute-all", host).json() == {"muted": 1}
+
+    assert _host_action(client, f"/api/participants/{guest['id']}/remove", host).status_code == 204
+    assert _state(client, code, guest)["me"]["status"] == "removed"
+    assert [p["id"] for p in _state(client, code, host)["participants"]] == [host["id"]]
+
+
+def test_chat_and_end_meeting(client, auth, start_instant):
+    meeting, host = start_instant()
+    code = meeting["meeting_code"]
+    client.post(f"/api/meetings/{code}/messages", json={"participant_id": host["id"], "content": "Hello"}, headers=pt(host))
+    state = _state(client, code, host)
+    assert [m["content"] for m in state["messages"]] == ["Hello"]
+    assert state["meeting"]["status"] == "live"
+
+    ended = _host_action(client, f"/api/meetings/{code}/end", host)
+    assert ended.json()["status"] == "ended"
+    recent = client.get("/api/meetings/recent", headers=auth).json()
+    assert code in [m["meeting_code"] for m in recent]
+    assert _guest(client, meeting, "Late").status_code == 400
+
+
+def test_last_person_leaving_ends_meeting(client, start_instant):
+    meeting, host = start_instant()
+    client.post(f"/api/participants/{host['id']}/leave", headers=pt(host))
+    lookup = client.get("/api/meetings/lookup", params={"q": meeting["meeting_code"]}).json()
+    assert lookup["status"] == "ended"
+
+
+def test_stale_participants_are_expired(client, auth, start_instant, monkeypatch):
+    from app.services import participants as participant_service
+
+    meeting, _host = start_instant()
+    monkeypatch.setattr(participant_service, "PARTICIPANT_TIMEOUT_SECONDS", -1)
+    client.get("/api/meetings/upcoming", headers=auth)
+    lookup = client.get("/api/meetings/lookup", params={"q": meeting["meeting_code"]}).json()
+    assert lookup["status"] == "ended"
+
+
+def test_new_meetings_have_default_settings(client, auth):
+    meeting = client.post("/api/meetings/instant", headers=auth).json()
+    assert meeting["settings"]["allow_chat"] is True
+    assert meeting["settings"]["waiting_room"] is False
+
+
+def test_only_host_can_change_settings(client, start_instant):
+    meeting, host = start_instant()
     guest = _guest(client, meeting).json()
     code = meeting["meeting_code"]
-    assert _settings(client, code, guest["id"], allow_chat=False).status_code == 403
-    assert _settings(client, code, host["id"], allow_chat=False).json()["allow_chat"] is False
+    assert _settings(client, code, guest, allow_chat=False).status_code == 403
+    assert _settings(client, code, host, allow_chat=False).json()["allow_chat"] is False
 
 
-def test_chat_and_reactions_follow_settings(client):
-    meeting, host = _start_instant(client)
+def test_chat_and_reactions_follow_settings(client, start_instant):
+    meeting, host = start_instant()
     guest = _guest(client, meeting).json()
     code = meeting["meeting_code"]
-    _settings(client, code, host["id"], allow_chat=False, allow_reactions=False)
+    _settings(client, code, host, allow_chat=False, allow_reactions=False)
 
-    msg = {"participant_id": guest["id"], "content": "hi"}
-    assert client.post(f"/api/meetings/{code}/messages", json=msg).status_code == 403
-    # The host is never blocked by their own rules.
-    msg["participant_id"] = host["id"]
-    assert client.post(f"/api/meetings/{code}/messages", json=msg).status_code == 201
+    url = f"/api/meetings/{code}/messages"
+    assert client.post(url, json={"participant_id": guest["id"], "content": "hi"}, headers=pt(guest)).status_code == 403
+    assert client.post(url, json={"participant_id": host["id"], "content": "hi"}, headers=pt(host)).status_code == 201
 
-    react = {"participant_id": guest["id"], "emoji": "👍"}
-    assert client.post(f"/api/meetings/{code}/reactions", json=react).status_code == 403
-    _settings(client, code, host["id"], allow_reactions=True)
-    assert client.post(f"/api/meetings/{code}/reactions", json=react).status_code == 201
-    state = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": host["id"]}
-    ).json()
-    assert [r["emoji"] for r in state["reactions"]] == ["👍"]
+    react = f"/api/meetings/{code}/reactions"
+    body = {"participant_id": guest["id"], "emoji": "👍"}
+    assert client.post(react, json=body, headers=pt(guest)).status_code == 403
+    _settings(client, code, host, allow_reactions=True)
+    assert client.post(react, json=body, headers=pt(guest)).status_code == 201
+    assert [r["emoji"] for r in _state(client, code, host)["reactions"]] == ["👍"]
 
 
-def test_unmute_video_and_rename_rules(client):
-    meeting, host = _start_instant(client)
+def test_unmute_video_and_rename_rules(client, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
-    _settings(client, code, host["id"], allow_unmute=False, allow_video=False, allow_rename=False)
+    _settings(client, code, host, allow_unmute=False, allow_video=False, allow_rename=False)
     guest = _guest(client, meeting).json()
-    # Joined muted with video off because of the rules.
     assert guest["is_muted"] is True and guest["is_video_on"] is False
 
     url = f"/api/participants/{guest['id']}"
-    assert client.patch(url, json={"is_muted": False}).status_code == 403
-    assert client.patch(url, json={"is_video_on": True}).status_code == 403
-    assert client.patch(url, json={"display_name": "New"}).status_code == 403
-    # Turning things off, or raising a hand, is always fine.
-    assert client.patch(url, json={"is_muted": True, "is_hand_raised": True}).status_code == 200
+    assert client.patch(url, json={"is_muted": False}, headers=pt(guest)).status_code == 403
+    assert client.patch(url, json={"is_video_on": True}, headers=pt(guest)).status_code == 403
+    assert client.patch(url, json={"display_name": "New"}, headers=pt(guest)).status_code == 403
+    assert client.patch(url, json={"is_muted": True, "is_hand_raised": True}, headers=pt(guest)).status_code == 200
 
-    _settings(client, code, host["id"], allow_rename=True)
-    assert client.patch(url, json={"display_name": "Renamed"}).json()["display_name"] == "Renamed"
-    # The host can rename anyone.
-    renamed = client.post(
-        f"/api/participants/{guest['id']}/rename",
-        json={"requester_id": host["id"], "display_name": "By Host"},
-    ).json()
+    _settings(client, code, host, allow_rename=True)
+    assert client.patch(url, json={"display_name": "Renamed"}, headers=pt(guest)).json()["display_name"] == "Renamed"
+    renamed = _host_action(client, f"/api/participants/{guest['id']}/rename", host, display_name="By Host").json()
     assert renamed["display_name"] == "By Host"
 
 
-def test_mute_on_entry(client):
-    meeting, host = _start_instant(client)
-    _settings(client, meeting["meeting_code"], host["id"], mute_on_entry=True)
+def test_mute_on_entry(client, start_instant):
+    meeting, host = start_instant()
+    _settings(client, meeting["meeting_code"], host, mute_on_entry=True)
     assert _guest(client, meeting).json()["is_muted"] is True
 
 
-def test_lock_meeting(client):
-    meeting, host = _start_instant(client)
-    _settings(client, meeting["meeting_code"], host["id"], is_locked=True)
+def test_lock_meeting(client, start_instant):
+    meeting, host = start_instant()
+    _settings(client, meeting["meeting_code"], host, is_locked=True)
     res = _guest(client, meeting)
-    assert res.status_code == 403
-    assert "locked" in res.json()["detail"]
+    assert res.status_code == 403 and "locked" in res.json()["detail"]
 
 
-def test_waiting_room_admit_and_remove(client):
-    meeting, host = _start_instant(client)
+def test_waiting_room_admit_and_remove(client, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
-    _settings(client, code, host["id"], waiting_room=True)
+    _settings(client, code, host, waiting_room=True)
     first = _guest(client, meeting, "First").json()
     second = _guest(client, meeting, "Second").json()
     assert first["status"] == "waiting"
 
-    host_view = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": host["id"]}
-    ).json()
+    host_view = _state(client, code, host)
     assert {p["display_name"] for p in host_view["waiting"]} == {"First", "Second"}
     assert [p["id"] for p in host_view["participants"]] == [host["id"]]
 
-    # Waiting people see nothing of the meeting yet.
-    waiting_view = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": first["id"]}
-    ).json()
+    waiting_view = _state(client, code, first)
     assert waiting_view["participants"] == [] and waiting_view["messages"] == []
 
-    client.post(f"/api/participants/{first['id']}/admit", json={"requester_id": host["id"]})
-    client.post(f"/api/participants/{second['id']}/remove", json={"requester_id": host["id"]})
-    host_view = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": host["id"]}
-    ).json()
+    _host_action(client, f"/api/participants/{first['id']}/admit", host)
+    _host_action(client, f"/api/participants/{second['id']}/remove", host)
+    host_view = _state(client, code, host)
     assert host_view["waiting"] == []
     assert len(host_view["participants"]) == 2
 
 
-def test_turning_off_waiting_room_admits_everyone(client):
-    meeting, host = _start_instant(client)
+def test_turning_off_waiting_room_admits_everyone(client, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
-    _settings(client, code, host["id"], waiting_room=True)
+    _settings(client, code, host, waiting_room=True)
     guest = _guest(client, meeting).json()
-    _settings(client, code, host["id"], waiting_room=False)
-    state = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": guest["id"]}
-    ).json()
-    assert state["me"]["status"] == "in_meeting"
+    _settings(client, code, host, waiting_room=False)
+    assert _state(client, code, guest)["me"]["status"] == "in_meeting"
 
 
-def test_suspend_activities(client):
-    meeting, host = _start_instant(client)
+def test_suspend_activities(client, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
     guest = _guest(client, meeting).json()
-    settings = client.post(f"/api/meetings/{code}/suspend", json={"requester_id": host["id"]}).json()
+    settings = _host_action(client, f"/api/meetings/{code}/suspend", host).json()
     assert settings["is_locked"] is True and settings["allow_chat"] is False
-    state = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": guest["id"]}
-    ).json()
-    assert state["me"]["is_muted"] is True and state["me"]["is_video_on"] is False
+    me = _state(client, code, guest)["me"]
+    assert me["is_muted"] is True and me["is_video_on"] is False
 
 
-def test_make_host_and_auto_host(client):
-    meeting, host = _start_instant(client)
+def test_make_host_and_auto_host(client, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
     guest = _guest(client, meeting).json()
     other = _guest(client, meeting, "Other").json()
 
-    res = client.post(f"/api/participants/{guest['id']}/make-host", json={"requester_id": host["id"]})
-    assert res.json()["role"] == "host"
-    # The old host lost their controls.
-    assert client.post(f"/api/meetings/{code}/mute-all", json={"requester_id": host["id"]}).status_code == 403
+    assert _host_action(client, f"/api/participants/{guest['id']}/make-host", host).json()["role"] == "host"
+    assert _host_action(client, f"/api/meetings/{code}/mute-all", host).status_code == 403
 
-    # When the host leaves without handing over, the earliest joiner takes over.
-    client.post(f"/api/participants/{guest['id']}/leave")
-    state = client.get(
-        f"/api/meetings/{code}/state", params={"participant_id": other["id"]}
-    ).json()
-    hosts = [p["display_name"] for p in state["participants"] if p["role"] == "host"]
+    client.post(f"/api/participants/{guest['id']}/leave", headers=pt(guest))
+    hosts = [p["display_name"] for p in _state(client, code, other)["participants"] if p["role"] == "host"]
     assert hosts == ["Alex Johnson"]
 
 
-def test_notes_are_private_and_saved(client):
-    meeting, host = _start_instant(client)
+def test_notes_are_private_and_saved(client, auth, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
     guest = _guest(client, meeting).json()
+    url = f"/api/meetings/{code}/notes"
 
-    client.put(f"/api/meetings/{code}/notes", json={"participant_id": host["id"], "content": "Host notes"})
-    client.put(f"/api/meetings/{code}/notes", json={"participant_id": guest["id"], "content": "Guest notes"})
-    client.put(f"/api/meetings/{code}/notes", json={"participant_id": host["id"], "content": "Host notes v2"})
+    client.put(url, json={"participant_id": host["id"], "content": "Host notes"}, headers=pt(host))
+    client.put(url, json={"participant_id": guest["id"], "content": "Guest notes"}, headers=pt(guest))
+    client.put(url, json={"participant_id": host["id"], "content": "Host notes v2"}, headers=pt(host))
 
-    host_note = client.get(f"/api/meetings/{code}/notes", params={"participant_id": host["id"]}).json()
-    guest_note = client.get(f"/api/meetings/{code}/notes", params={"participant_id": guest["id"]}).json()
-    assert host_note["content"] == "Host notes v2"
-    assert guest_note["content"] == "Guest notes"
-    # The signed in user can read their notes later from the Meetings page.
-    assert client.get(f"/api/meetings/{code}/notes/mine").json()["content"] == "Host notes v2"
+    assert client.get(url, params={"participant_id": host["id"]}, headers=pt(host)).json()["content"] == "Host notes v2"
+    assert client.get(url, params={"participant_id": guest["id"]}, headers=pt(guest)).json()["content"] == "Guest notes"
+    # Reading someone else's notes needs their key.
+    assert client.get(url, params={"participant_id": host["id"]}, headers=pt(guest)).status_code == 403
+    assert client.get(f"{url}/mine", headers=auth).json()["content"] == "Host notes v2"
 
 
-def test_rejoining_from_same_browser_replaces_old_entry(client):
-    me = client.get("/api/users/me").json()
-    meeting = client.post("/api/meetings/instant").json()
+def test_rejoining_from_same_tab_replaces_old_entry(client, auth):
+    meeting = client.post("/api/meetings/instant", headers=auth).json()
     code = meeting["meeting_code"]
     host = client.post(
-        f"/api/meetings/{code}/join",
-        json={"display_name": me["name"], "user_id": me["id"], "client_id": "browser-a"},
+        f"/api/meetings/{code}/join", json={"display_name": "Alex Johnson", "client_id": "tab-a"}, headers=auth
     ).json()
-    guest = client.post(
-        f"/api/meetings/{code}/join",
-        json={"display_name": "Guest", "passcode": meeting["passcode"], "client_id": "browser-b"},
-    ).json()
-    client.post(f"/api/participants/{guest['id']}/make-host", json={"requester_id": host["id"]})
+    guest = _guest(client, meeting, client_id="tab-b").json()
+    _host_action(client, f"/api/participants/{guest['id']}/make-host", host)
 
-    # The guest (now host) presses Back and joins again from the same browser.
-    again = client.post(
-        f"/api/meetings/{code}/join",
-        json={"display_name": "Guest", "passcode": meeting["passcode"], "client_id": "browser-b"},
-    ).json()
+    again = _guest(client, meeting, client_id="tab-b").json()
     assert again["role"] == "host"
-    state = client.get(f"/api/meetings/{code}/state", params={"participant_id": again["id"]}).json()
-    names = sorted(p["display_name"] for p in state["participants"])
-    assert names == ["Alex Johnson", "Guest"]  # not shown twice
+    names = sorted(p["display_name"] for p in _state(client, code, again)["participants"])
+    assert names == ["Alex Johnson", "Guest"]
 
 
-def test_admitted_person_skips_waiting_room_on_rejoin(client):
-    meeting, host = _start_instant(client)
+def test_admitted_person_skips_waiting_room_on_rejoin(client, start_instant):
+    meeting, host = start_instant()
     code = meeting["meeting_code"]
-    _settings(client, code, host["id"], waiting_room=True)
-    body = {"display_name": "G", "passcode": meeting["passcode"], "client_id": "browser-c"}
-    first = client.post(f"/api/meetings/{code}/join", json=body).json()
-    client.post(f"/api/participants/{first['id']}/admit", json={"requester_id": host["id"]})
-    again = client.post(f"/api/meetings/{code}/join", json=body).json()
+    _settings(client, code, host, waiting_room=True)
+    first = _guest(client, meeting, "G", client_id="tab-c").json()
+    _host_action(client, f"/api/participants/{first['id']}/admit", host)
+    again = _guest(client, meeting, "G", client_id="tab-c").json()
     assert again["status"] == "in_meeting"

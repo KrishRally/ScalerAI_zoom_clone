@@ -11,6 +11,7 @@ from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
+    EmailStr,
     Field,
     PlainSerializer,
     field_validator,
@@ -51,6 +52,66 @@ class UserOut(ORMModel):
     personal_meeting_id: str
 
 
+def _clean_name(value: str) -> str:
+    value = " ".join(value.split())
+    if not value:
+        raise ValueError("Name cannot be empty")
+    return value
+
+
+class SignUp(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    # EmailStr checks it's a real looking address (name@domain.tld).
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        return _clean_name(value)
+
+
+class SignIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class AuthResult(BaseModel):
+    token: str
+    user: UserOut
+
+
+class ProfileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    avatar_color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return None if value is None else _clean_name(value)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class UserSettingsOut(ORMModel):
+    start_with_video: bool
+    join_muted: bool
+    show_preview: bool
+    default_waiting_room: bool
+    default_mute_on_entry: bool
+
+
+class UserSettingsUpdate(BaseModel):
+    start_with_video: bool | None = None
+    join_muted: bool | None = None
+    show_preview: bool | None = None
+    default_waiting_room: bool | None = None
+    default_mute_on_entry: bool | None = None
+
+
 # ---------- Meetings ----------
 
 
@@ -65,9 +126,9 @@ class ScheduledMeetingCreate(BaseModel):
     duration_minutes: int = Field(default=60, ge=15, le=24 * 60)
     # Leave empty to have one generated.
     passcode: str | None = Field(default=None, max_length=10)
-    # Options shown on Zoom's schedule form.
-    waiting_room: bool = False
-    mute_on_entry: bool = False
+    # Options shown on Zoom's schedule form. Left out = use the user's defaults.
+    waiting_room: bool | None = None
+    mute_on_entry: bool | None = None
 
     @field_validator("title")
     @classmethod
@@ -138,9 +199,6 @@ class MeetingLookup(BaseModel):
 class JoinRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     passcode: str | None = None
-    # Set when the logged in user joins (for example from the dashboard).
-    # The host of the meeting gets host controls.
-    user_id: int | None = None
     is_muted: bool = False
     is_video_on: bool = True
     # The browser's own random id (see Participant.client_id).
@@ -167,6 +225,12 @@ class ParticipantOut(ORMModel):
     is_hand_raised: bool
     joined_at: UTCOutput
     left_at: UTCOutput | None
+
+
+class JoinResult(ParticipantOut):
+    """Returned once, when joining. The token proves who you are for every later action."""
+
+    participant_token: str
 
 
 class ParticipantUpdate(BaseModel):

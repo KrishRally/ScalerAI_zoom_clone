@@ -8,8 +8,8 @@ from fastapi.responses import JSONResponse
 
 from app.config import CORS_ORIGIN_REGEX, CORS_ORIGINS
 from app.database import Base, SessionLocal, add_missing_columns, engine
-from app.routers import meetings, participants, users
-from app.seed import seed_database
+from app.routers import auth, meetings, participants, users
+from app.seed import ensure_demo_password, seed_database
 from app.services.errors import ServiceError
 
 
@@ -20,6 +20,7 @@ async def lifespan(_app: FastAPI):
     add_missing_columns()
     with SessionLocal() as db:
         seed_database(db)
+        ensure_demo_password(db)
     yield
 
 
@@ -41,6 +42,7 @@ async def handle_service_error(_request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(meetings.router)
 app.include_router(participants.router)
