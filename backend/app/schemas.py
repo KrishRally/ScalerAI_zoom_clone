@@ -225,6 +225,7 @@ class ParticipantOut(ORMModel):
     is_video_on: bool
     is_hand_raised: bool
     is_sharing_screen: bool | None = False
+    share_with_video: bool | None = False
     joined_at: UTCOutput
     left_at: UTCOutput | None
 
@@ -248,14 +249,6 @@ class SignalOut(BaseModel):
     data: dict
 
 
-class IceServersOut(BaseModel):
-    ice_servers: list[dict]
-    # False means STUN only: people on strict networks may not see each other's video.
-    has_relay: bool
-    # Send everything through the relay (TURN_FORCE_RELAY).
-    relay_only: bool = False
-
-
 class JoinResult(ParticipantOut):
     """Returned once, when joining. The token proves who you are for every later action."""
 
@@ -267,6 +260,7 @@ class ParticipantUpdate(BaseModel):
     is_video_on: bool | None = None
     is_hand_raised: bool | None = None
     is_sharing_screen: bool | None = None
+    share_with_video: bool | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("display_name")

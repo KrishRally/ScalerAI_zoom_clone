@@ -13,6 +13,7 @@ import random
 from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import DEMO_EMAIL, DEMO_PASSWORD, DEMO_UTC_OFFSET_MINUTES
@@ -202,7 +203,12 @@ def seed_daily_meetings(db: Session) -> int:
             db.flush()  # so the next meeting code is checked against this one
             added += 1
         db.add(SampleDay(day=day.isoformat()))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another request filled the same new day at the same moment: keep theirs.
+        db.rollback()
+        return 0
     return added
 
 

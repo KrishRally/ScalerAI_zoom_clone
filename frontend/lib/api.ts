@@ -190,7 +190,7 @@ export const api = {
 
   updateSelf: (
     participantId: number,
-    changes: Partial<Pick<Participant, "is_muted" | "is_video_on" | "is_hand_raised" | "is_sharing_screen" | "display_name">>,
+    changes: Partial<Pick<Participant, "is_muted" | "is_video_on" | "is_hand_raised" | "is_sharing_screen" | "share_with_video" | "display_name">>,
   ) =>
     request<Participant>(`/api/participants/${participantId}`, {
       method: "PATCH",
@@ -202,10 +202,6 @@ export const api = {
   // ---------- WebRTC signalling: connection notes passed between browsers ----------
   sendSignal: (participantId: number, to: number, data: SignalData) =>
     postAs<void>(participantId, `/api/participants/${participantId}/signals`, { to, data }),
-  iceServers: (participantId: number) =>
-    request<{ ice_servers: unknown[]; has_relay: boolean; relay_only: boolean }>(`/api/participants/${participantId}/ice-servers`, {
-      headers: asParticipant(participantId),
-    }),
   takeSignals: (participantId: number) =>
     request<{ id: number; from_id: number; data: SignalData }[]>(`/api/participants/${participantId}/signals`, {
       headers: asParticipant(participantId),

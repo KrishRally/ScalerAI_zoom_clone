@@ -1,47 +1,47 @@
 // Real audio, video and screen sharing between people, using WebRTC.
 //
+// Built for people on the same Wi-Fi / local network, where browsers can
+// always reach each other directly. (Across the internet some networks need
+// a relay server, which this app doesn't use.)
+//
 // How it works, in short:
 // - Every pair of people in a meeting gets one direct browser-to-browser
 //   connection (a "mesh"). Fine for small meetings; big ones would need a media server.
 // - To connect, browsers swap two notes through our API: an "offer" and an
-//   "answer". Each note says what media will be sent and how to reach the
-//   sender (its network addresses, found with a STUN server). This swap is
-//   called signalling. After that, media flows directly between the browsers.
+//   "answer". Each note says what media will be sent and the sender's network
+//   addresses. This swap is called signalling. After that, media flows
+//   directly between the browsers.
 // - The person with the lower participant id always sends the offer, so two
 //   people never offer to each other at the same time.
-// - Each connection carries three slots in a fixed order: microphone, camera
-//   and screen share. Turning the camera off, switching devices or starting
-//   a share just swaps the track in a slot (replaceTrack), so there is no
-//   need to renegotiate the connection.
+// - Each connection carries four slots in a fixed order: microphone, camera,
+//   shared screen and shared computer sound. Turning the camera off,
+//   switching devices or starting a share just swaps the track in a slot
+//   (replaceTrack), so there is no need to renegotiate the connection.
 
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { SignalData } from "@/lib/types";
 
-export type Slot = "audio" | "camera" | "screen";
-const SLOTS: Slot[] = ["audio", "camera", "screen"];
-const KINDS = ["audio", "video", "video"] as const;
+export type Slot = "audio" | "camera" | "screen" | "screenAudio";
+const SLOTS: Slot[] = ["audio", "camera", "screen", "screenAudio"];
+const KINDS = ["audio", "video", "video", "audio"] as const;
 
 export interface RemoteMedia {
   audio: MediaStream | null;
   camera: MediaStream | null;
   screen: MediaStream | null;
+  screenAudio: MediaStream | null;
   state: RTCPeerConnectionState;
 }
 
-/** Used only if the server can't be asked (old server or network trouble). */
-const FALLBACK_ICE: RTCIceServer[] = [{ urls: ["stun:stun.l.google.com:19302"] }];
+const EMPTY: RemoteMedia = { audio: null, camera: null, screen: null, screenAudio: null, state: "new" };
 
-/** How the calls are doing overall, for messages in the room. */
-export interface MeshStatus {
-  /** The server has a TURN relay, so strict networks can still connect. */
-  hasRelay: boolean;
-  /** The server doesn't know about video calls yet (an old version is running). */
-  serverOutdated: boolean;
-}
+// On a local network the browsers' own addresses are enough. One public STUN
+// server is kept as a backup for networks that hide local addresses.
+const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 
 // We send each note once, with all network addresses inside, instead of
 // trickling them one by one. Simpler with polling; this is the longest we wait.
-const GATHER_MAX_MS = 5000; // relay addresses can take a few seconds
+const GATHER_MAX_MS = 2000;
 // If nobody answers our offer in this time (they may still be joining), offer again.
 const ANSWER_TIMEOUT_MS = 10_000;
 // An answered connection that still isn't up after this long is started again.
@@ -88,39 +88,13 @@ export class PeerMesh {
   private stopped = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval>;
-  private iceServers: RTCIceServer[] = FALLBACK_ICE;
-  private relayOnly = false;
-  /** Resolves once we know which STUN / TURN servers to use. */
-  private ready: Promise<void>;
-  private status: MeshStatus = { hasRelay: false, serverOutdated: false };
-  private isReady = false;
 
   constructor(
     private readonly me: number,
     private readonly onChange: (remote: Record<number, RemoteMedia>) => void,
-    private readonly onStatus: (status: MeshStatus) => void = () => {},
   ) {
-    this.ready = api
-      .iceServers(me)
-      .then((res) => {
-        this.iceServers = res.ice_servers as RTCIceServer[];
-        this.relayOnly = res.relay_only;
-        this.setStatus({ hasRelay: res.has_relay });
-      })
-      .catch((e) => {
-        if (e instanceof ApiError && (e.status === 404 || e.status === 405)) this.setStatus({ serverOutdated: true });
-      });
-    this.ready.then(() => {
-      this.isReady = true;
-      this.poll();
-      this.checkConnections(); // start the offers that were waiting
-    });
+    this.poll();
     this.watchdog = setInterval(() => this.checkConnections(), 2000);
-  }
-
-  private setStatus(changes: Partial<MeshStatus>) {
-    this.status = { ...this.status, ...changes };
-    this.onStatus(this.status);
   }
 
   /** The people (participant ids) who are in the meeting right now, not counting us. */
@@ -129,7 +103,6 @@ export class PeerMesh {
     for (const id of Array.from(this.peers.keys())) {
       if (!this.wanted.has(id)) this.close(id);
     }
-    if (!this.isReady) return; // offers start once we know the servers
     for (const id of Array.from(this.wanted)) {
       if (!this.peers.has(id) && this.me < id) this.offer(id);
     }
@@ -156,6 +129,7 @@ export class PeerMesh {
       this.local?.getAudioTracks()[0] ?? null,
       this.local?.getVideoTracks()[0] ?? null,
       this.screen?.getVideoTracks()[0] ?? null,
+      this.screen?.getAudioTracks()[0] ?? null,
     ];
     peer.senders.forEach((sender, i) => {
       if (sender.track !== tracks[i]) sender.replaceTrack(tracks[i]).catch(() => {});
@@ -163,7 +137,7 @@ export class PeerMesh {
   }
 
   private update(id: number, changes: Partial<RemoteMedia>) {
-    const before = this.remote[id] ?? { audio: null, camera: null, screen: null, state: "new" as const };
+    const before = this.remote[id] ?? EMPTY;
     this.remote = { ...this.remote, [id]: { ...before, ...changes } };
     this.onChange(this.remote);
   }
@@ -172,14 +146,11 @@ export class PeerMesh {
 
   private create(id: number, offerer: boolean, session: string): Peer {
     this.close(id, false);
-    const pc = new RTCPeerConnection({
-      iceServers: this.iceServers,
-      iceTransportPolicy: this.relayOnly ? "relay" : "all",
-    });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const peer: Peer = { pc, session, offerer, senders: [], startedAt: Date.now(), answered: false, droppedAt: null };
 
     pc.ontrack = (e) => {
-      // The slot is known from the transceiver's position: 0 mic, 1 camera, 2 screen.
+      // The slot is known from the transceiver's position: mic, camera, screen, screen sound.
       const slot = SLOTS[pc.getTransceivers().indexOf(e.transceiver)];
       if (slot) this.update(id, { [slot]: new MediaStream([e.track]) });
     };
@@ -190,7 +161,7 @@ export class PeerMesh {
     };
 
     this.peers.set(id, peer);
-    this.update(id, { audio: null, camera: null, screen: null, state: "new" });
+    this.update(id, EMPTY);
     return peer;
   }
 
@@ -212,7 +183,6 @@ export class PeerMesh {
 
   /** We have the lower id: start a connection and send the offer. */
   private async offer(id: number) {
-    await this.ready;
     if (this.stopped || !this.wanted.has(id)) return;
     const session = newSession();
     const peer = this.create(id, true, session);
@@ -231,7 +201,6 @@ export class PeerMesh {
 
   /** Someone with a lower id wants to connect: answer them. */
   private async answer(from: number, data: SignalData) {
-    await this.ready;
     const existing = this.peers.get(from);
     if (existing?.session === data.session) return; // already handled this offer
     const peer = this.create(from, false, data.session);
@@ -240,7 +209,7 @@ export class PeerMesh {
       await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
       const transceivers = pc.getTransceivers();
       transceivers.forEach((t) => (t.direction = "sendrecv"));
-      peer.senders = transceivers.slice(0, 3).map((t) => t.sender);
+      peer.senders = transceivers.slice(0, SLOTS.length).map((t) => t.sender);
       this.sendTracks(peer);
       await pc.setLocalDescription(await pc.createAnswer());
       await waitForAddresses(pc);
@@ -266,7 +235,7 @@ export class PeerMesh {
 
   /** Restart connections that never got an answer or that broke. */
   private checkConnections() {
-    if (!this.isReady || this.stopped) return;
+    if (this.stopped) return;
     const now = Date.now();
     this.peers.forEach((peer, id) => {
       const state = peer.pc.connectionState;
@@ -301,10 +270,8 @@ export class PeerMesh {
         if (note.data.type === "offer") await this.answer(note.from_id, note.data);
         else if (note.data.type === "answer") await this.accept(note.from_id, note.data);
       }
-    } catch (e) {
-      // An old server without the signals endpoint: say so instead of trying forever.
-      if (e instanceof ApiError && (e.status === 404 || e.status === 405)) this.setStatus({ serverOutdated: true });
-      // Otherwise a network hiccup: try again on the next tick.
+    } catch {
+      // Network hiccup: try again on the next tick.
     }
     if (!this.stopped) this.pollTimer = setTimeout(() => this.poll(), this.settling() ? POLL_FAST_MS : POLL_SLOW_MS);
   }

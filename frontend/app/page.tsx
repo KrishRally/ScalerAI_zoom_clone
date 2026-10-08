@@ -12,6 +12,7 @@ import UpcomingMeetingRow from "@/components/home/UpcomingMeetingRow";
 import RecentMeetingRow from "@/components/home/RecentMeetingRow";
 import { CameraIcon, JoinIcon, NotesIcon, ScheduleIcon, ShareIcon } from "@/components/home/TileIcons";
 import JoinMeetingModal from "@/components/modals/JoinMeetingModal";
+import ShareScreenModal from "@/components/modals/ShareScreenModal";
 import Spinner from "@/components/ui/Spinner";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
@@ -46,6 +47,7 @@ function Dashboard() {
   }, [reload]);
   const { openSchedule, openEdit, remove, dialogs } = useScheduleDialogs(reloadAll);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("upcoming");
 
@@ -99,7 +101,7 @@ function Dashboard() {
             <ActionTile
               label="Share screen"
               icon={ShareIcon}
-              onClick={() => toast("Start or join a meeting first, then click Share Screen in the meeting.", "info")}
+              onClick={() => setShareOpen(true)}
             />
             <ActionTile label="My Notes" icon={NotesIcon} onClick={() => router.push("/docs")} />
           </div>
@@ -158,6 +160,7 @@ function Dashboard() {
       </div>
 
       <JoinMeetingModal open={joinOpen} onClose={() => setJoinOpen(false)} />
+      <ShareScreenModal open={shareOpen} onClose={() => setShareOpen(false)} />
       {dialogs}
     </AppShell>
   );

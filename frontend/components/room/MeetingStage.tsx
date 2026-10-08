@@ -43,6 +43,14 @@ export default function MeetingStage({ participants, meId, myStream, remote, spe
   // Whose screen to show: someone else's share comes first, then ours.
   const sharer = participants.find((p) => p.is_sharing_screen && p.id !== meId && remote[p.id]?.screen);
   const shared = sharer ? remote[sharer.id]!.screen : screen;
+  // Presentation option "Screen and my video": the presenter's video sits on the screen.
+  const presenter = sharer ?? (screen ? participants.find((p) => p.id === meId) : undefined);
+  const presenterVideo =
+    presenter?.share_with_video && presenter.is_video_on
+      ? presenter.id === meId
+        ? myStream
+        : remote[presenter.id]?.camera ?? null
+      : null;
 
   // Speaker view features whoever spoke last (not us, unless we're alone).
   const lastSpeaker = useLastSpeaker(speaking, meId);
@@ -67,6 +75,12 @@ export default function MeetingStage({ participants, meId, myStream, remote, spe
           {shared ? (
             <div className="relative h-full w-full overflow-hidden rounded-lg bg-black">
               <VideoPreview stream={shared} mirrored={false} className="!object-contain" />
+              {presenter && presenterVideo?.getVideoTracks().length ? (
+                <div data-testid="presenter-video" className="absolute bottom-3 right-3 aspect-video w-1/4 min-w-[140px] overflow-hidden rounded-lg border-2 border-white/30 bg-room-tile shadow-pop">
+                  <VideoPreview stream={presenterVideo} mirrored={presenter.id === meId} />
+                  <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 text-[10px] text-white">{presenter.display_name}</span>
+                </div>
+              ) : null}
               {sharer && (
                 <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-xs text-white">
                   You are viewing {sharer.display_name}&apos;s screen

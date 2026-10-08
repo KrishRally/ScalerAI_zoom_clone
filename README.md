@@ -95,7 +95,8 @@ Every item from the assignment, and where to find it.
 - **Suspend participant activities:** one button that mutes everyone, stops their video, turns off chat and the rest, and locks the meeting.
 - **Mute All**, mute one person, **rename** anyone, **remove** a participant, **End meeting for all**.
 - **Make host**, and when the host clicks Leave while others are still in, they are asked to **assign a new host** first. If the host drops off anyway, the person who joined first becomes host automatically.
-- **Real audio, video and screen sharing between people (WebRTC):** everyone hears and sees everyone else. Mute, camera off, switching mic or camera and screen sharing all reach the others right away. When someone shares, everyone's view switches to that screen ("You are viewing Alex's screen"). The green "talking" border and speaker view follow whoever is actually speaking.
+- **Real audio, video and screen sharing between people (WebRTC), on the same Wi-Fi network:** everyone hears and sees everyone else. Mute, camera off, switching mic or camera and screen sharing all reach the others right away. When someone shares, everyone's view switches to that screen ("You are viewing Alex's screen"). The green "talking" border and speaker view follow whoever is actually speaking.
+- **Share Screen, like Zoom:** from the Home page, **Share screen** asks for the **meeting ID** (or an invite link), then the **passcode** if the meeting has one, then opens the share window: **Basic** (Screen, Window or Browser tab, with **Share sound** and **Optimize for video clip**) and then **Presentation** (**Screen only** or **Screen and my video**, which puts your video in a corner of the shared screen for everyone). You join with mic muted and camera off and your screen is shared straight away. Inside a meeting, **Share** opens the same window. Like Zoom, **one person shares at a time**: starting a share stops the previous one (they see "Alex started sharing"). Browsers don't let a web page list your windows, so after **Share** the browser shows its own list to pick the exact screen, window or tab.
 - **Responsive:** works on phone, tablet and desktop (side panels become full screen on phones).
 
 ## How it works
@@ -108,11 +109,11 @@ Browser (Next.js on Vercel)  ──HTTPS/JSON──>  FastAPI (Railway)  ──S
 
 **Audio and video use WebRTC** (`frontend/lib/webrtc.ts`). Every pair of people in a meeting gets a direct browser-to-browser connection (a "mesh"). The server never touches the media; it only passes two short notes between the browsers so they can find each other:
 
-1. The person with the **lower participant id** creates an **offer**: what it will send (mic, camera, screen) and its network addresses (found with Google's public STUN server). It posts it to `POST /api/participants/{id}/signals`.
+1. The person with the **lower participant id** creates an **offer**: what it will send (mic, camera, screen, screen sound) and its network addresses on the local network. It posts it to `POST /api/participants/{id}/signals`.
 2. The other person collects it from `GET /api/participants/{id}/signals` (checked every 0.7 s while connecting, 2.5 s otherwise), creates an **answer** and posts it back.
-3. The browsers connect directly and media flows. If their networks don't allow that, media goes through a TURN relay instead (see "Assumptions and limits").
+3. The browsers connect directly over the Wi-Fi network and media flows.
 
-Each connection has three fixed slots: mic, camera and screen. Muting disables the mic track; camera off, switching devices and screen sharing just swap the track in a slot (`replaceTrack`), so nothing has to be renegotiated. A connection that gets no answer in 10 s, or breaks, is started again automatically. Using the lower id as the one who offers means two people never offer to each other at the same time. Notes are deleted once delivered (or after 2 minutes).
+Each connection has four fixed slots: mic, camera, screen and screen sound. Muting disables the mic track; camera off, switching devices and screen sharing just swap the track in a slot (`replaceTrack`), so nothing has to be renegotiated. A connection that gets no answer in 10 s, or breaks, is started again automatically. Using the lower id as the one who offers means two people never offer to each other at the same time. Notes are deleted once delivered (or after 2 minutes).
 
 **No duplicate people.** Leaving the room page any way (the Leave button, the browser's Back button, a link) tells the server you left. Each browser tab also sends a random `client_id` when it joins; if the same tab joins again (after Back, a refresh or a crash), the server replaces its old entry instead of adding a second one, and keeps the host role if it had it.
 
@@ -307,7 +308,7 @@ Design choices:
 - **`participants.user_id` can be NULL.** Guests join with only a display name, exactly like Zoom. The display name is stored on the participant row because the same user can use a different name in each meeting.
 - **`sample_days` remembers which days got sample meetings,** not which meetings. The demo calendar fills each day once (5 to 10 meetings, in working hours, no overlaps, the same plan every time for a given day). New days roll in as time passes, and a sample meeting someone deletes stays deleted.
 - **`signals` is a short-lived mailbox, not history.** WebRTC offers and answers wait here until the other browser picks them up, then they are deleted. Indexed on `(to_participant_id, id)` so each check is one fast lookup. Only people in the same meeting can send to each other, and each note is capped at 64 KB.
-- **`participants.is_sharing_screen`** tells everyone whose screen to show. The picture itself goes over WebRTC. Host rules apply: when the host turns screen sharing off, the server clears this flag for everyone but the host.
+- **`participants.is_sharing_screen`** tells everyone whose screen to show, and **`share_with_video`** whether the presenter chose "Screen and my video". The picture itself goes over WebRTC. Host rules apply: when the host turns screen sharing off, the server clears this flag for everyone but the host.
 - **One participant row per join.** This keeps a history of who was in each meeting, which is how "Recent meetings" and the meeting duration work.
 - **`status` columns instead of deleting rows.** Leaving or being removed keeps the row, so history and chat authors stay intact.
 - **Chat links to the participant, not the user.** Guests can chat too, and the message shows the name used in that meeting.
@@ -364,7 +365,6 @@ Interactive docs are at `/docs` on the backend.
 | PATCH | `/api/participants/{id}` | Update your own mic, camera, raised hand, screen sharing or name (host rules apply) |
 | POST | `/api/participants/{id}/signals` | WebRTC: leave an offer or answer for another participant |
 | GET | `/api/participants/{id}/signals` | WebRTC: collect (and delete) the notes left for you |
-| GET | `/api/participants/{id}/ice-servers` | WebRTC: STUN and TURN relay servers to use (TURN logins only for people in a meeting) |
 | POST | `/api/participants/{id}/leave` | Leave the meeting |
 | POST | `/api/participants/{id}/mute` | Host: mute one person |
 | POST | `/api/participants/{id}/remove` | Host: remove one person (from the meeting or waiting room) |
@@ -439,7 +439,6 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
    - `FRONTEND_URL` = your Vercel URL, for example `https://your-app.vercel.app`
    - `CORS_ORIGINS` = the same Vercel URL
    - Optional: `DEMO_PASSWORD` to change the demo account's password
-   - For video calls across strict networks: `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` (or `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`). See "Assumptions and limits".
 5. Under **Settings > Networking**, click **Generate Domain**. Check `https://<domain>/api/health` returns `{"status":"ok"}`.
 
 **Frontend on Vercel**
@@ -455,11 +454,7 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 - **The sign in token is kept in `localStorage`.** The API is on a different domain from the site, so a cookie would need cross-site cookie setup. The trade-off is that a cross-site scripting bug could read the token; React escapes all output, and sessions expire after 30 days.
 - **Who is host:** the signed in owner of the meeting. People who join with an invite link, with or without an account, join as attendees. The host can hand over the role, and the owner gets it back if they rejoin.
 - **Mesh WebRTC, sized for small meetings.** Each person sends their video to every other person, so upload grows with the meeting size. That is fine for a handful of people; large meetings would need a media server (an SFU such as LiveKit or mediasoup) that receives each stream once and forwards it.
-- **Strict networks need a TURN relay.** Without one, two people on phone data or behind many home routers stay on "Connecting..." (STUN alone can't get through). The server hands out relay logins from `GET /api/participants/{id}/ice-servers` (only to people in a meeting, so they aren't public). Set one option on Railway:
-  - **Cloudflare (free tier, recommended):** in the Cloudflare dashboard open **Realtime > TURN Server > Create**, then set `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN`. The server asks Cloudflare for short lived logins and reuses them for an hour.
-  - **Any other TURN server** (Metered, your own coturn): `TURN_URLS` (comma separated), `TURN_USERNAME`, `TURN_CREDENTIAL`.
-  - Optional `TURN_FORCE_RELAY=true` sends all media through the relay, which hides people's IP addresses from each other.
-  If no relay is set up and someone can't connect after about 25 seconds, the room says so in a bar at the top.
+- **Video calls are for people on the same Wi-Fi network.** On one network the browsers can always reach each other directly, so no relay server is needed and nothing extra has to be set up or paid for. Across different networks (for example phone data) some routers block direct connections; that would need a TURN relay server, which this project leaves out on purpose. If someone can't be reached after about 25 seconds, the room says so in a bar at the top; chat, reactions and everything else keep working.
 - **Signalling uses polling**, like the rest of the room. Connecting takes about 1 to 3 seconds. WebSockets would make it near instant.
 - **Browsers may block sound until you click.** If that happens, a "Click to hear the other participants" bar appears.
 - **Notes are private.** Only the person who wrote them can read them.

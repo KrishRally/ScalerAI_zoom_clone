@@ -87,6 +87,7 @@ export interface Participant {
   is_video_on: boolean;
   is_hand_raised: boolean;
   is_sharing_screen?: boolean | null;
+  share_with_video?: boolean | null;
   joined_at: string;
   left_at: string | null;
 }

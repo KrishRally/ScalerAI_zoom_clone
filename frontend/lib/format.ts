@@ -24,9 +24,6 @@ export const formatTime = (iso: string) =>
 export const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 
-export const formatLongDate = (date: Date) =>
-  date.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-
 export function isSameDay(a: Date, b: Date) {
   return (
     a.getFullYear() === b.getFullYear() &&

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PeerMesh, type MeshStatus, type RemoteMedia } from "@/lib/webrtc";
+import { PeerMesh, type RemoteMedia } from "@/lib/webrtc";
 
 /**
  * Connects this tab to everyone else in the meeting over WebRTC and returns
@@ -9,12 +9,11 @@ import { PeerMesh, type MeshStatus, type RemoteMedia } from "@/lib/webrtc";
  */
 export function usePeerMesh(me: number, peerIds: number[], local: MediaStream | null, screen: MediaStream | null) {
   const [remote, setRemote] = useState<Record<number, RemoteMedia>>({});
-  const [status, setStatus] = useState<MeshStatus>({ hasRelay: false, serverOutdated: false });
   const mesh = useRef<PeerMesh | null>(null);
 
   useEffect(() => {
     if (typeof RTCPeerConnection === "undefined") return; // very old browser: no calls, the rest still works
-    const m = new PeerMesh(me, setRemote, setStatus);
+    const m = new PeerMesh(me, setRemote);
     mesh.current = m;
     return () => {
       m.destroy();
@@ -33,5 +32,5 @@ export function usePeerMesh(me: number, peerIds: number[], local: MediaStream | 
     mesh.current?.setLocal(local, screen);
   }, [local, screen]);
 
-  return { remote, status };
+  return remote;
 }

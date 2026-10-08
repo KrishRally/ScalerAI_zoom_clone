@@ -535,6 +535,9 @@ def test_screen_share_flag_follows_host_rules(client, start_instant):
     code = meeting["meeting_code"]
     on = {"is_sharing_screen": True}
     assert client.patch(f"/api/participants/{guest['id']}", json=on, headers=pt(guest)).json()["is_sharing_screen"] is True
+    # The presentation option travels with the share.
+    shown = client.patch(f"/api/participants/{guest['id']}", json={"share_with_video": True}, headers=pt(guest)).json()
+    assert shown["share_with_video"] is True
 
     # The host turns screen sharing off: the guest stops sharing and can't start again.
     client.patch(f"/api/meetings/{code}/settings", json={"requester_id": host["id"], "allow_screen_share": False}, headers=pt(host))
@@ -543,59 +546,6 @@ def test_screen_share_flag_follows_host_rules(client, start_instant):
     assert client.patch(f"/api/participants/{guest['id']}", json=on, headers=pt(guest)).status_code == 403
     # The host can still share.
     assert client.patch(f"/api/participants/{host['id']}", json=on, headers=pt(host)).json()["is_sharing_screen"] is True
-
-
-def test_ice_servers(client, start_instant, monkeypatch):
-    from app import config
-
-    meeting, host = start_instant()
-    url = f"/api/participants/{host['id']}/ice-servers"
-    assert client.get(url).status_code == 403  # only for people in a meeting
-    plain = client.get(url, headers=pt(host)).json()
-    assert plain["has_relay"] is False and plain["ice_servers"][0]["urls"][0].startswith("stun:")
-
-    monkeypatch.setattr(config, "TURN_URLS", ["turn:relay.example.com:3478"])
-    monkeypatch.setattr(config, "TURN_USERNAME", "u")
-    monkeypatch.setattr(config, "TURN_CREDENTIAL", "p")
-    relay = client.get(url, headers=pt(host)).json()
-    assert relay["has_relay"] is True
-    assert {"urls": ["turn:relay.example.com:3478"], "username": "u", "credential": "p"} in relay["ice_servers"]
-    assert relay["relay_only"] is False
-    monkeypatch.setattr(config, "TURN_FORCE_RELAY", True)
-    assert client.get(url, headers=pt(host)).json()["relay_only"] is True
-
-
-def test_cloudflare_turn_logins(monkeypatch):
-    import io
-    import json as _json
-
-    from app import config
-    from app.services import ice
-
-    calls = []
-
-    class FakeResponse(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    def fake_urlopen(req, timeout):
-        calls.append((req.full_url, req.headers.get("Authorization")))
-        body = {"iceServers": [{"urls": ["turn:turn.cloudflare.com:3478?transport=udp"], "username": "x", "credential": "y"}]}
-        return FakeResponse(_json.dumps(body).encode())
-
-    monkeypatch.setattr(config, "CLOUDFLARE_TURN_KEY_ID", "key123")
-    monkeypatch.setattr(config, "CLOUDFLARE_TURN_API_TOKEN", "secret")
-    monkeypatch.setattr(ice.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(ice, "_cache", {"servers": None, "until": 0.0})
-
-    servers = ice.ice_servers()
-    assert ice.has_relay(servers)
-    assert calls == [("https://rtc.live.cloudflare.com/v1/turn/keys/key123/credentials/generate-ice-servers", "Bearer secret")]
-    ice.ice_servers()  # reused from the cache, no second call
-    assert len(calls) == 1
 
 
 def test_settings_row_created_once_even_when_two_requests_race(client, auth):
@@ -614,3 +564,17 @@ def test_settings_row_created_once_even_when_two_requests_race(client, auth):
         assert ma.settings is None and mb.settings is None  # both see it missing
         get_settings(a, ma)
         assert get_settings(b, mb).meeting_id == mb.id  # second one doesn't crash
+
+
+def test_only_one_person_shares_at_a_time(client, start_instant):
+    meeting, host = start_instant()
+    code = meeting["meeting_code"]
+    guest = _guest(client, meeting, "Ola").json()
+    on = {"is_sharing_screen": True, "share_with_video": True}
+    client.patch(f"/api/participants/{host['id']}", json=on, headers=pt(host))
+    client.patch(f"/api/participants/{guest['id']}", json={"is_sharing_screen": True}, headers=pt(guest))
+    people = {p["id"]: p for p in _state(client, code, guest)["participants"]}
+    assert people[guest["id"]]["is_sharing_screen"] is True
+    assert people[host["id"]]["is_sharing_screen"] is False  # the new share took over
+    assert people[host["id"]]["share_with_video"] is False
+

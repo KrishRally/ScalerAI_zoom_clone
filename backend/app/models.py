@@ -149,6 +149,8 @@ class Participant(Base):
     is_hand_raised: Mapped[bool] = mapped_column(Boolean, default=False)
     # True while this person shares their screen (the picture itself goes over WebRTC).
     is_sharing_screen: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Presentation option chosen when sharing: also show the presenter's video next to the screen.
+    share_with_video: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # A random id each browser tab keeps, so rejoining from the same tab
     # replaces the old entry instead of showing the person twice.
     client_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

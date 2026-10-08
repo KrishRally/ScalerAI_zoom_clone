@@ -247,6 +247,13 @@ def update_participant(
         if changes.get("is_sharing_screen") is True and not settings.allow_screen_share:
             raise Forbidden("The host has disabled screen sharing")
 
+    # One person shares at a time, like Zoom: starting a share stops anyone else's.
+    if changes.get("is_sharing_screen") is True:
+        for other in active_participants(db, participant.meeting):
+            if other.id != participant.id and other.is_sharing_screen:
+                other.is_sharing_screen = False
+                other.share_with_video = False
+
     for field, value in changes.items():
         setattr(participant, field, value)
     db.commit()
@@ -372,6 +379,7 @@ def _stop_attendee_sharing(db: Session, meeting: Meeting) -> None:
     for p in active_participants(db, meeting):
         if p.role != ParticipantRole.host:
             p.is_sharing_screen = False
+            p.share_with_video = False
 
 
 def suspend_activities(db: Session, meeting: Meeting, requester_id: int) -> schemas.SettingsOut:
@@ -393,6 +401,7 @@ def suspend_activities(db: Session, meeting: Meeting, requester_id: int) -> sche
             p.is_muted = True
             p.is_video_on = False
             p.is_sharing_screen = False
+            p.share_with_video = False
     db.commit()
     return schemas.SettingsOut.model_validate(settings)
 

@@ -12,6 +12,7 @@ import MeetingStage, { type ViewMode } from "@/components/room/MeetingStage";
 import NotesPanel from "@/components/room/NotesPanel";
 import ParticipantsPanel from "@/components/room/ParticipantsPanel";
 import RemoteAudio, { resumeRemoteAudio } from "@/components/room/RemoteAudio";
+import SharePicker from "@/components/share/SharePicker";
 import RenameModal from "@/components/room/RenameModal";
 import RoomEndScreen from "@/components/room/RoomEndScreen";
 import WaitingRoomScreen from "@/components/room/WaitingRoomScreen";
@@ -26,6 +27,7 @@ import { useSpeaking } from "@/hooks/useSpeaking";
 import { api } from "@/lib/api";
 import { elapsed, invitationText } from "@/lib/format";
 import { clearMeetingSession, loadMeetingSession, type MeetingSession } from "@/lib/session";
+import { clearPendingShare, takePendingShare } from "@/lib/shareScreen";
 import type { MeetingSettings, Participant } from "@/lib/types";
 
 export default function MeetingPage() {
@@ -51,7 +53,9 @@ function Room({ code, session }: { code: string; session: MeetingSession }) {
   const { meeting, me, endReason } = room;
 
   useEffect(() => {
-    if (endReason) clearMeetingSession(code);
+    if (!endReason) return;
+    clearMeetingSession(code);
+    clearPendingShare(); // a screen picked on the Home page that never got shared
   }, [endReason, code]);
 
   // Leaving the room page any other way (the browser's Back button, a link)
@@ -64,6 +68,7 @@ function Room({ code, session }: { code: string; session: MeetingSession }) {
       if (window.location.pathname !== roomPath) {
         api.leaveInBackground(session.participantId);
         clearMeetingSession(code);
+        clearPendingShare();
       }
     };
   }, [code, session.participantId]);
@@ -79,6 +84,7 @@ function Room({ code, session }: { code: string; session: MeetingSession }) {
     const leave = async () => {
       await api.leave(session.participantId).catch(() => {});
       clearMeetingSession(code);
+      clearPendingShare();
       router.push("/");
     };
     return <WaitingRoomScreen meeting={meeting} onLeave={leave} />;
@@ -107,6 +113,9 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
   const [viewMenu, setViewMenu] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [screen, setScreen] = useState<MediaStream | null>(null);
+  // Presentation option: show our video next to the shared screen.
+  const [shareWithVideo, setShareWithVideo] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [renaming, setRenaming] = useState<Participant | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
 
@@ -168,8 +177,50 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     screenRef.current?.getTracks().forEach((t) => t.stop());
     setScreen(null);
     // Tell everyone we stopped, so their view goes back to the videos.
-    if (wasSharing) api.updateSelf(pid, { is_sharing_screen: false }).catch(() => {});
+    setShareWithVideo(false);
+    if (wasSharing) api.updateSelf(pid, { is_sharing_screen: false, share_with_video: false }).catch(() => {});
   }, [pid]);
+
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
+  const shareStartedAt = useRef(0);
+
+  /** Start sharing a screen picked in the share window (here or on the Home page). */
+  const startShare = useCallback(
+    async (s: MediaStream, withVideo: boolean) => {
+      try {
+        await api.updateSelf(pid, { is_sharing_screen: true, share_with_video: withVideo });
+      } catch (e) {
+        s.getTracks().forEach((t) => t.stop());
+        throw e; // for example the host has just turned sharing off
+      }
+      if (unmounted.current) {
+        s.getTracks().forEach((t) => t.stop()); // we left while this was starting
+        return;
+      }
+      shareStartedAt.current = Date.now();
+      screenRef.current?.getTracks().forEach((t) => t.stop()); // replacing an earlier share
+      // The browser's own "Stop sharing" button ends the track.
+      s.getVideoTracks()[0]?.addEventListener("ended", stopShare);
+      setScreen(s);
+      setShareWithVideo(withVideo);
+    },
+    [pid, stopShare],
+  );
+
+  // Shared from the Home page: the screen is already picked, start sharing it.
+  useEffect(() => {
+    const pending = takePendingShare(code);
+    if (!pending) return;
+    startShare(pending.stream, pending.withVideo).catch((e) => toast((e as Error).message, "info"));
+    // Only once, when we enter the meeting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (blocked.share && screenRef.current) {
       stopShare();
@@ -177,6 +228,17 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     }
   }, [blocked.share, stopShare, toast]);
   useEffect(() => () => screenRef.current?.getTracks().forEach((t) => t.stop()), []);
+
+  // One person shares at a time: if someone else started sharing, the server
+  // turned ours off. (Wait a moment after starting, in case the poll is out of date.)
+  useEffect(() => {
+    if (!screenRef.current || me.is_sharing_screen || Date.now() - shareStartedAt.current < 4000) return;
+    const other = participants.find((p) => p.is_sharing_screen && p.id !== pid);
+    screenRef.current.getTracks().forEach((t) => t.stop());
+    setScreen(null);
+    setShareWithVideo(false);
+    if (other) toast(`${other.display_name} started sharing`, "info");
+  }, [me, participants, pid, toast]);
 
   // Close the host panel if we stop being host.
   useEffect(() => {
@@ -195,15 +257,17 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
   const people: Participant[] = useMemo(
     () =>
       participants.map((p) =>
-        p.id === pid ? { ...p, is_muted: !audioOn, is_video_on: videoOn, is_sharing_screen: !!screen } : p,
+        p.id === pid
+          ? { ...p, is_muted: !audioOn, is_video_on: videoOn, is_sharing_screen: !!screen, share_with_video: !!screen && shareWithVideo }
+          : p,
       ),
-    [participants, pid, audioOn, videoOn, screen],
+    [participants, pid, audioOn, videoOn, screen, shareWithVideo],
   );
   const others = people.filter((p) => p.id !== pid);
 
   // ---- Real audio and video with everyone else (WebRTC) ----
-  const { remote, status: callStatus } = usePeerMesh(pid, others.map((p) => p.id), media.stream, screen);
-  // Someone we can't reach after a while: usually a network that needs a relay (TURN) server.
+  const remote = usePeerMesh(pid, others.map((p) => p.id), media.stream, screen);
+  // Someone we can't reach after a while: video calls need everyone on the same Wi-Fi network.
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
     const notConnected = others.some((p) => remote[p.id] && remote[p.id].state !== "connected");
@@ -240,20 +304,11 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
     toggleVideo();
   };
 
-  const toggleShare = async () => {
+  const toggleShare = () => {
     if (screen) return stopShare();
     if (blocked.share) return toast("The host has disabled screen sharing", "info");
     if (!navigator.mediaDevices?.getDisplayMedia) return toast("Screen sharing is not supported on this device", "error");
-    try {
-      const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      // The browser's own "Stop sharing" button ends the track.
-      s.getVideoTracks()[0].addEventListener("ended", stopShare);
-      await api.updateSelf(pid, { is_sharing_screen: true });
-      setScreen(s);
-    } catch (e) {
-      // The user closed the picker, or the host has just turned sharing off.
-      if (e instanceof Error && e.message.includes("host")) toast(e.message, "info");
-    }
+    setPickerOpen(true);
   };
 
   const react = async (emoji: string) => {
@@ -434,16 +489,9 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
           <WifiOff className="h-3.5 w-3.5" /> Connection lost. Reconnecting...
         </div>
       )}
-      {callStatus.serverOutdated && (
-        <div className="shrink-0 bg-amber-500 py-1 text-center text-xs font-semibold text-zoom-ink">
-          Video calling isn&apos;t available: the server is running an older version. Redeploy the backend.
-        </div>
-      )}
-      {!callStatus.serverOutdated && stuck && (
+      {stuck && (
         <div className="shrink-0 bg-[#2B2B2B] px-3 py-1 text-center text-xs text-[#D0D0D0]">
-          {callStatus.hasRelay
-            ? "Still connecting to someone. Their network may be blocking video; chat and reactions still work."
-            : "Can't reach someone's video. Your networks need a relay (TURN) server, which isn't set up on this server yet. Chat and reactions still work."}
+          Can&apos;t reach someone&apos;s audio and video. Video calls work when everyone is on the same Wi-Fi network. Chat and reactions still work.
         </div>
       )}
       {audioBlocked && (
@@ -532,9 +580,24 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
 
       {/* Everyone else's voices */}
       {others.map((p) => {
-        const voice = remote[p.id]?.audio;
-        return voice ? <RemoteAudio key={p.id} stream={voice} onBlocked={onAudioBlocked} /> : null;
+        const { audio, screenAudio } = remote[p.id] ?? {};
+        return (
+          <span key={p.id} hidden>
+            {audio && <RemoteAudio stream={audio} onBlocked={onAudioBlocked} />}
+            {/* Their computer's sound, when they share with "Share sound" */}
+            {screenAudio && p.is_sharing_screen && <RemoteAudio stream={screenAudio} onBlocked={onAudioBlocked} />}
+          </span>
+        );
       })}
+
+      <SharePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onShare={async (s, withVideo) => {
+          await startShare(s, withVideo);
+          setPickerOpen(false);
+        }}
+      />
 
       <RenameModal participant={renaming} isSelf={renaming?.id === pid} onClose={() => setRenaming(null)} onSave={rename} />
       <AssignHostModal open={assignOpen} candidates={others} onClose={() => setAssignOpen(false)} onAssign={assignAndLeave} />
