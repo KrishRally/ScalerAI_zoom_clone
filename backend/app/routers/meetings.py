@@ -7,7 +7,7 @@ from app import schemas
 from app.database import get_db
 from app.dependencies import get_current_user, get_optional_user, participant_token
 from app.models import User
-from app.seed import DEFAULT_USER_EMAIL, refresh_sample_meetings
+from app.seed import DEFAULT_USER_EMAIL, refresh_sample_meetings, seed_daily_meetings
 from app.services import meetings as meeting_service
 from app.services import participants as participant_service
 from app.services.errors import Forbidden
@@ -23,6 +23,7 @@ def upcoming_meetings(
     if user.email == DEFAULT_USER_EMAIL:
         # Keep the shared demo dashboard from going empty as the sample dates pass.
         refresh_sample_meetings(db)
+        seed_daily_meetings(db)  # new days roll in as time passes
     return [
         meeting_service.to_meeting_out(db, m)
         for m in meeting_service.list_upcoming(db, user)

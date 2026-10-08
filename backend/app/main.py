@@ -13,6 +13,7 @@ from app.seed import (
     ensure_demo_password,
     keep_sample_chats_private,
     refresh_sample_meetings,
+    seed_daily_meetings,
     seed_database,
     seed_docs,
     seed_team_chat,
@@ -28,6 +29,7 @@ async def lifespan(_app: FastAPI):
     with SessionLocal() as db:
         seed_database(db)
         refresh_sample_meetings(db)
+        seed_daily_meetings(db)
         ensure_demo_password(db)
         seed_team_chat(db)
         keep_sample_chats_private(db)

@@ -48,3 +48,7 @@ TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL", "")
 # Send all video through the relay, never directly. Hides people's IP addresses
 # from each other (more private) at the cost of relay traffic. Needs a TURN server.
 TURN_FORCE_RELAY = os.getenv("TURN_FORCE_RELAY", "false").lower() in ("1", "true", "yes")
+
+# Sample meetings for the demo account are placed in business hours of this
+# time zone (minutes from UTC). 330 = India (UTC+5:30).
+DEMO_UTC_OFFSET_MINUTES = int(os.getenv("DEMO_UTC_OFFSET_MINUTES", "330"))

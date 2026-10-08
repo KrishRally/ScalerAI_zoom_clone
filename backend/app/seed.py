@@ -9,12 +9,13 @@ upcoming meetings are always in the future.
 """
 
 import os
-from datetime import timedelta
+import random
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import DEMO_EMAIL, DEMO_PASSWORD
+from app.config import DEMO_EMAIL, DEMO_PASSWORD, DEMO_UTC_OFFSET_MINUTES
 from app.models import (
     ChannelMember,
     ChannelMessage,
@@ -27,6 +28,7 @@ from app.models import (
     MeetingStatus,
     MeetingType,
     Participant,
+    SampleDay,
     ParticipantRole,
     ParticipantStatus,
     User,
@@ -109,6 +111,99 @@ def refresh_sample_meetings(db: Session) -> None:
         return
     _add_upcoming_samples(db, me, utcnow())
     db.commit()
+
+
+# ---------- A busy sample calendar: 5 to 10 meetings every day ----------
+
+DAILY_UNTIL = date(2026, 10, 20)  # fill at least up to this day...
+DAILY_MIN_DAYS = 12  # ...and always about the next two weeks
+WORKDAY = (time(9, 0), time(18, 0))
+
+_DAILY = [
+    # (title, description, minutes)
+    ("Daily Standup", "Yesterday, today, blockers.", 15),
+    ("Design Review", "Walk through the latest mockups.", 60),
+    ("1:1 with Priya", None, 30),
+    ("1:1 with Daniel", None, 30),
+    ("Sprint Planning", "Pick stories for the next sprint.", 60),
+    ("Backlog Grooming", "Size and order the backlog.", 45),
+    ("Customer Call: Acme Corp", "Feedback on the new dashboard.", 30),
+    ("Interview: Frontend Engineer", "Technical round.", 60),
+    ("Marketing Sync", "Launch campaign status.", 30),
+    ("Product Demo", "Show the latest build to the team.", 45),
+    ("Bug Bash", "Find and file bugs before release.", 60),
+    ("Architecture Review", "Discuss the API changes.", 45),
+    ("Lunch & Learn: WebRTC", "How video calls connect.", 45),
+    ("Team Retro", "What went well, what to improve.", 45),
+    ("Hiring Debrief", "Decide on this week's candidates.", 30),
+    ("Coffee Chat with Sara", None, 15),
+    ("Release Go/No-Go", "Final checks before shipping.", 15),
+    ("Analytics Review", "Weekly numbers.", 30),
+]
+
+
+def _daily_plan(day: date) -> list[tuple[str, str | None, datetime, int]]:
+    """5 to 10 non-overlapping meetings in working hours. The same day always gets the same plan."""
+    rng = random.Random(day.toordinal())
+    wanted = rng.randint(5, 10)
+    plan = []
+    t = datetime.combine(day, WORKDAY[0])
+    end = datetime.combine(day, WORKDAY[1])
+    titles = rng.sample(_DAILY, k=len(_DAILY))
+    while len(plan) < wanted and titles:
+        title, description, minutes = titles.pop()
+        if t + timedelta(minutes=minutes) > end:
+            continue
+        plan.append((title, description, t, minutes))
+        # A short break (or none) before the next one, on the quarter hour.
+        t += timedelta(minutes=minutes + rng.choice([0, 0, 15, 15, 30]))
+    return plan
+
+
+def seed_daily_meetings(db: Session) -> int:
+    """Give the demo account 5 to 10 meetings a day, up to DAILY_UNTIL (or two weeks ahead).
+
+    Days already filled are remembered in `sample_days`, so this is cheap to
+    run often and never brings back a meeting someone deleted. Returns how
+    many meetings were added.
+    """
+    me = db.scalar(select(User).where(User.email == DEFAULT_USER_EMAIL))
+    if me is None:
+        return 0
+    offset = timedelta(minutes=DEMO_UTC_OFFSET_MINUTES)
+    now = utcnow()
+    today = (now + offset).date()
+    last = max(DAILY_UNTIL, today + timedelta(days=DAILY_MIN_DAYS - 1))
+    days = [today + timedelta(days=i) for i in range((last - today).days + 1)]
+    done = set(db.scalars(select(SampleDay.day).where(SampleDay.day.in_([d.isoformat() for d in days]))).all())
+
+    added = 0
+    for day in days:
+        if day.isoformat() in done:
+            continue
+        for title, description, local_start, minutes in _daily_plan(day):
+            start = local_start - offset  # stored in UTC
+            if start < now + timedelta(minutes=10):
+                continue  # earlier today: don't add meetings in the past
+            db.add(
+                Meeting(
+                    meeting_code=generate_meeting_code(db),
+                    title=title,
+                    description=description,
+                    host_id=me.id,
+                    meeting_type=MeetingType.scheduled,
+                    status=MeetingStatus.scheduled,
+                    passcode=generate_passcode(),
+                    scheduled_start=start,
+                    duration_minutes=minutes,
+                    settings=MeetingSettings(),
+                )
+            )
+            db.flush()  # so the next meeting code is checked against this one
+            added += 1
+        db.add(SampleDay(day=day.isoformat()))
+    db.commit()
+    return added
 
 
 def seed_database(db: Session) -> None:

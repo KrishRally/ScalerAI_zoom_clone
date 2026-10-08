@@ -39,7 +39,7 @@ Every item from the assignment, and where to find it.
 | Host controls (mute all / remove) | Done, plus more | Participants panel and Host tools: mute all, remove, waiting room, lock, make host, rename, allow or block chat, video and more |
 | **Notes from the brief** | | |
 | No login required | Done | A default user (Alex Johnson) is signed in automatically; see "Assumptions" |
-| Sample data | Done | `backend/app/seed.py`: users, upcoming and past meetings, chats, docs. Upcoming samples refill themselves when they run out |
+| Sample data | Done | `backend/app/seed.py`: users, past meetings, chats, docs, and **5 to 10 meetings every day** (9 AM to 6 PM India time) up to 20 October 2026 and always about two weeks ahead |
 | Own database schema | Done | See "Database schema" below (diagram and reasons) |
 | README with setup, stack, assumptions | Done | "Run it locally", "Tech stack", "Assumptions and limits" |
 
@@ -74,7 +74,7 @@ Every item from the assignment, and where to find it.
 - **Join meeting:** by Meeting ID (with or without spaces) or by pasting the full invite link. The meeting is checked before you continue. You enter a display name and the passcode (filled in automatically from invite links) in the preview window.
 - **Preview window (like Zoom's):** shown before every meeting, for the host too. Live camera with Audio and Video buttons, dropdowns to pick your microphone and camera (remembered for next time), and an "Always show this preview when joining" checkbox.
 - **Schedule meeting:** topic, description, date picker, time picker (30 minute steps like Zoom), duration, optional custom passcode, and options for waiting room and muting people when they join. The link is generated automatically, saved in the database and shown in Upcoming. After saving you get the full invitation to copy.
-- **Meetings page:** Zoom's Meetings tab with Upcoming and Previous lists grouped by day, and a details panel with Start, Copy invitation, Edit, Delete and your notes from that meeting.
+- **Meetings page:** laid out like Zoom's Meetings tab. On the left: a month calendar (dots on days with meetings, today highlighted), a blue **+** to schedule, your name, and your **Personal meeting ID** (click to copy). On the right: an **Agenda** of the chosen day and the two weeks after it, grouped by day, each meeting showing start and end time, title and host, with a red line marking **now**. Toolbar: Today, previous / next day, search this list, refresh, a filter to hide meetings that are over, and an **Agenda / Previous meetings** switch. Click a meeting for its details (Start, Copy invitation, Edit, Delete and your notes from it).
 
 **Meeting room**
 - Gallery view (tiles sized to fit the screen at 16:9, like Zoom) and Speaker view.
@@ -289,6 +289,9 @@ erDiagram
         string emoji
         datetime created_at
     }
+    sample_days {
+        string day PK "a day that already got its sample meetings"
+    }
     signals {
         int id PK
         int meeting_id FK
@@ -302,6 +305,7 @@ erDiagram
 Design choices:
 - **`meeting_code` vs `id`.** `id` is the internal key used in joins. `meeting_code` is the public 10 digit number people type. It is unique and indexed. Keeping them separate means the public ID can follow its own format without touching the keys.
 - **`participants.user_id` can be NULL.** Guests join with only a display name, exactly like Zoom. The display name is stored on the participant row because the same user can use a different name in each meeting.
+- **`sample_days` remembers which days got sample meetings,** not which meetings. The demo calendar fills each day once (5 to 10 meetings, in working hours, no overlaps, the same plan every time for a given day). New days roll in as time passes, and a sample meeting someone deletes stays deleted.
 - **`signals` is a short-lived mailbox, not history.** WebRTC offers and answers wait here until the other browser picks them up, then they are deleted. Indexed on `(to_participant_id, id)` so each check is one fast lookup. Only people in the same meeting can send to each other, and each note is capped at 64 KB.
 - **`participants.is_sharing_screen`** tells everyone whose screen to show. The picture itself goes over WebRTC. Host rules apply: when the host turns screen sharing off, the server clears this flag for everyone but the host.
 - **One participant row per join.** This keeps a history of who was in each meeting, which is how "Recent meetings" and the meeting duration work.
@@ -463,7 +467,7 @@ Open http://localhost:3000: you are signed in as the demo user straight away. Yo
 - **Every room action is checked on the server** with the participant key, and every host action also checks the role.
 - **Personal Meeting ID** is shown in the profile menu but not used to start meetings.
 - **Search** looks through your own meetings (hosted or joined) by title or Meeting ID. Pasting a full Meeting ID or invite link that isn't yours offers "Join meeting". Ctrl+E (Cmd+E) jumps to it, like in Zoom. It is shown on wide screens only.
-- **Sample meetings refill themselves.** Their times count from the first start, so after a few days they would all be in the past. When the demo user has no upcoming meetings left, a fresh set is added (`refresh_sample_meetings`, on startup and when the dashboard loads). It only happens when the list is empty, so a meeting you delete does not come back.
+- **The sample calendar keeps itself full.** On startup and when the dashboard loads, `seed_daily_meetings` gives the demo account 5 to 10 meetings on each day that hasn't had them yet (up to 20 October 2026, and always about two weeks ahead). Times are working hours in India (`DEMO_UTC_OFFSET_MINUTES`, default 330). As a last resort, `refresh_sample_meetings` adds a small set if the demo account has no upcoming meetings at all.
 - **Notifications are built, not stored.** The bell is made on each request from data the app already has (unread chats, `document_members.added_at`, upcoming meetings), so there is no notifications table to keep in sync. One column, `users.notifications_seen_at`, decides which items are new. It refreshes every 20 seconds.
 - **Sample chats are demo-only.** You only see chats you are a member of, and only the demo account and its seeded teammates are in the sample chats. On startup, `keep_sample_chats_private` also removes accounts that older versions auto-added to "General" (with their posts there).
 - **Team Chat and Docs update by polling** (every few seconds), like the meeting room. Two people typing in the same document at the same moment: the last save wins; edits from others appear when you pause typing.

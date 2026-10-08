@@ -212,3 +212,56 @@ def test_notifications(client, new_user):
     client.post(f"/api/chat/channels/{dm['id']}/read", headers=hb)
     assert {n["kind"] for n in client.get("/api/notifications", headers=hb).json()["items"]} == {"doc", "meeting"}
     assert client.get("/api/notifications").status_code == 401
+
+
+# ---------- Sample calendar ----------
+
+
+def test_daily_plan_is_5_to_10_meetings_in_working_hours():
+    from datetime import date as _date
+
+    from app.seed import WORKDAY, _daily_plan
+
+    for offset in range(30):
+        day = _date(2026, 10, 1) + timedelta(days=offset)
+        plan = _daily_plan(day)
+        assert 5 <= len(plan) <= 10
+        assert plan == _daily_plan(day)  # same day, same plan
+        for (_, _, start, minutes), nxt in zip(plan, plan[1:] + [None]):
+            assert start.time() >= WORKDAY[0]
+            end = start + timedelta(minutes=minutes)
+            assert end.time() <= WORKDAY[1]
+            if nxt:
+                assert end <= nxt[2]  # no overlaps
+
+
+def test_demo_calendar_is_filled_every_day_until_the_20th(client, auth):
+    from app.database import SessionLocal
+    from app.seed import DAILY_UNTIL, seed_daily_meetings
+
+    tz = timezone(timedelta(minutes=330))
+    today = datetime.now(tz).date()
+    last = max(DAILY_UNTIL, today + timedelta(days=11))
+    start = datetime.combine(today + timedelta(days=1), datetime.min.time(), tz)
+    end = datetime.combine(last + timedelta(days=1), datetime.min.time(), tz)
+    meetings = client.get(
+        "/api/meetings/calendar", params={"start": start.isoformat(), "end": end.isoformat()}, headers=auth
+    ).json()
+    per_day = {}
+    for m in meetings:
+        d = datetime.fromisoformat(m["scheduled_start"].replace("Z", "+00:00")).astimezone(tz).date()
+        per_day[d] = per_day.get(d, 0) + 1
+    for i in range((last - today).days):
+        day = today + timedelta(days=i + 1)
+        assert per_day.get(day, 0) >= 5, day
+
+    # Deleting a sample meeting doesn't bring it back.
+    victim = meetings[0]
+    assert client.delete(f"/api/meetings/{victim['meeting_code']}", headers=auth).status_code == 204
+    with SessionLocal() as db:
+        assert seed_daily_meetings(db) == 0
+    client.get("/api/meetings/upcoming", headers=auth)
+    codes = {m["meeting_code"] for m in client.get(
+        "/api/meetings/calendar", params={"start": start.isoformat(), "end": end.isoformat()}, headers=auth
+    ).json()}
+    assert victim["meeting_code"] not in codes

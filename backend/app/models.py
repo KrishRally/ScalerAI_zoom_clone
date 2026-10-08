@@ -166,6 +166,18 @@ class Participant(Base):
     __table_args__ = (Index("ix_participants_meeting_status", "meeting_id", "status"),)
 
 
+class SampleDay(Base):
+    """Days that already got their sample meetings for the demo account.
+
+    Remembering the day (not the meetings) means a sample meeting someone
+    deletes stays deleted instead of being added again.
+    """
+
+    __tablename__ = "sample_days"
+
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # "2026-10-14", in demo local time
+
+
 class Signal(Base):
     """A WebRTC connection note passed from one participant's browser to another's.
 
