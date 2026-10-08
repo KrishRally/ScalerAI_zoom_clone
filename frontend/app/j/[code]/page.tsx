@@ -74,10 +74,16 @@ function PreJoinForm({ code, meeting }: { code: string; meeting: MeetingLookup }
   const router = useRouter();
   const { user, settings, updateSettings } = useAuth();
 
-  // Only the signed in owner of the meeting starts it as host.
-  const isHostStart = !!user && meeting.host_id === user.id;
+  // Only the signed in owner of the meeting starts it as host. If the owner
+  // opens an invite link (not the Start button), they most likely want to join
+  // as someone else, for example to test from a second tab, so we ask for a
+  // name. They can still switch back and join as host.
+  const isOwner = !!user && meeting.host_id === user.id;
+  const [asGuest, setAsGuest] = useState(() => isOwner && params.get("start") !== "1");
+  const isHostStart = isOwner && !asGuest;
+  const guestName = () => params.get("name") || loadDisplayName();
 
-  const [name, setName] = useState(() => user?.name || params.get("name") || loadDisplayName());
+  const [name, setName] = useState(() => (user && !asGuest ? user.name : guestName()));
   const [passcode, setPasscode] = useState(params.get("pwd") ?? "");
   const [showPreview, setShowPreview] = useState(() => settings?.show_preview ?? loadShowPreview());
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -100,8 +106,9 @@ function PreJoinForm({ code, meeting }: { code: string; meeting: MeetingLookup }
         passcode: isHostStart ? undefined : passcode.trim(),
         is_muted: !media.audioOn,
         is_video_on: media.videoOn,
+        as_guest: asGuest || undefined,
       });
-      if (!user) saveDisplayName(name.trim());
+      if (!user || asGuest) saveDisplayName(name.trim());
       // Signed in users keep this choice in their settings; guests in this browser.
       if (user) {
         if (settings && settings.show_preview !== showPreview) updateSettings({ show_preview: showPreview }).catch(() => {});
@@ -115,6 +122,12 @@ function PreJoinForm({ code, meeting }: { code: string; meeting: MeetingLookup }
       setJoinError((err as Error).message);
       setJoining(false);
     }
+  }
+
+  function switchMode(guest: boolean) {
+    setAsGuest(guest);
+    setName(guest ? guestName() : user?.name ?? "");
+    setJoinError(null);
   }
 
   const ended = meeting.status === "ended" && !isHostStart;
@@ -207,6 +220,14 @@ function PreJoinForm({ code, meeting }: { code: string; meeting: MeetingLookup }
                 <p className="text-xs text-zoom-muted">Hosted by {meeting.host_name}</p>
               )}
             </>
+          )}
+          {isOwner && (
+            <p className="text-xs text-zoom-muted">
+              {asGuest ? `You're signed in as ${user?.name}, the host. ` : "Testing from another tab? "}
+              <button type="button" className="font-semibold text-zoom-blue hover:underline" onClick={() => switchMode(!asGuest)}>
+                {asGuest ? "Join as host instead" : "Join as a guest instead"}
+              </button>
+            </p>
           )}
         </div>
       </form>

@@ -205,6 +205,9 @@ class JoinRequest(BaseModel):
     # The browser's own random ids (see Participant.client_id and device_id).
     client_id: str | None = Field(default=None, max_length=64)
     device_id: str | None = Field(default=None, max_length=64)
+    # Join as a guest even when signed in (for example the host testing their
+    # own invite link in a second tab). The sign in is then ignored.
+    as_guest: bool = False
 
     @field_validator("display_name")
     @classmethod

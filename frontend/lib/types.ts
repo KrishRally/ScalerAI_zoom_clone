@@ -145,6 +145,8 @@ export interface JoinInput {
   is_muted?: boolean;
   is_video_on?: boolean;
   client_id?: string;
+  /** Join as a guest even when signed in (the server then ignores the sign in). */
+  as_guest?: boolean;
 }
 
 // ---------- People, Team Chat, Docs ----------

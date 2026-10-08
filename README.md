@@ -40,7 +40,7 @@ A short tour of the main features. Everything happens on the live app.
 
 1. **Open the app.** You land on the Home page, already signed in as Alex. The "Today" card and the Meetings tab are full of sample meetings.
 2. **Start a meeting.** Click **New meeting**. A preview window shows your camera and lets you pick your microphone and camera. Click **Start**.
-3. **Invite a second person.** In the meeting, click **ⓘ** next to the title and copy the invite link. Open it in a **private / incognito window** (or on another device), type a name and click **Join**. You now have two people in the meeting.
+3. **Invite a second person.** In the meeting, click **ⓘ** next to the title and copy the invite link. Open it in a new tab, a private window or another device, type a name and click **Join**. (In the same browser you are still signed in as Alex, so the page asks for a guest name and offers "Join as host instead".) You now have two people in the meeting.
 4. **Talk and share.** Both windows see and hear each other. Try **Chat**, **React**, **Raise Hand** and **Share** (pick Screen, Window or Browser tab, then "Screen only" or "Screen and my video").
 5. **Be the host.** In the first window open **Participants** and hover over the guest: **Mute** them, or **...** then **Remove** (they can't rejoin). Open **Host tools** to turn on the **waiting room**, **lock** the meeting, or block chat, video or screen sharing. Then join again from another private window and **Admit** the person from the waiting room.
 6. **Schedule a meeting.** Back on Home, click **Schedule**, pick a date, time and duration, and save. It shows up in **Upcoming meetings**, on the **Meetings** page and on the **Calendar**.

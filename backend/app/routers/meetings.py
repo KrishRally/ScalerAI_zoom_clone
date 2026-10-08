@@ -152,9 +152,10 @@ def join_meeting(
     db: Session = Depends(get_db),
     user: User | None = Depends(get_optional_user),
 ):
-    """Guests can join without an account. Signed in owners join as host."""
+    """Guests can join without an account. Signed in owners join as host,
+    unless they ask to join as a guest."""
     meeting = meeting_service.get_meeting(db, code)
-    return participant_service.join_meeting(db, meeting, data, user)
+    return participant_service.join_meeting(db, meeting, data, None if data.as_guest else user)
 
 
 @router.get("/{code}/state", response_model=schemas.RoomState)

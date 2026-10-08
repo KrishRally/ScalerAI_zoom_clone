@@ -594,3 +594,18 @@ def test_removed_people_cannot_rejoin(client, auth, start_instant):
     # The host can always come back.
     back = client.post(f"/api/meetings/{code}/join", json={"display_name": "Alex Johnson"}, headers=auth)
     assert back.status_code == 201
+
+
+def test_signed_in_host_can_join_their_own_meeting_as_guest(client, auth, start_instant):
+    meeting, host = start_instant()
+    code = meeting["meeting_code"]
+    body = {"display_name": "Sam", "passcode": meeting["passcode"], "client_id": "tab-2", "as_guest": True}
+    guest = client.post(f"/api/meetings/{code}/join", json=body, headers=auth)
+    assert guest.status_code == 201
+    assert guest.json()["display_name"] == "Sam" and guest.json()["role"] == "attendee"
+    # The real host keeps host controls.
+    people = {p["display_name"]: p["role"] for p in _state(client, code, host)["participants"]}
+    assert people["Alex Johnson"] == "host"
+    # A guest join still needs the passcode.
+    body.pop("passcode")
+    assert client.post(f"/api/meetings/{code}/join", json=body, headers=auth).status_code == 403
