@@ -193,6 +193,7 @@ erDiagram
         bool is_video_on
         bool is_hand_raised
         bool is_sharing_screen
+        bool share_with_video "presenter video on the shared screen"
         string client_id "per browser tab, for rejoin"
         string token_hash "hash of the participant key"
         datetime joined_at
