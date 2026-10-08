@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LayoutGrid, Lock, ShieldCheck, User as UserIcon, Volume2, WifiOff } from "lucide-react";
+import { Info, LayoutGrid, Lock, NotebookPen, ShieldCheck, User as UserIcon, Volume2, WifiOff } from "lucide-react";
 import AssignHostModal from "@/components/room/AssignHostModal";
 import ChatPanel from "@/components/room/ChatPanel";
 import ControlBar, { type Panel } from "@/components/room/ControlBar";
@@ -17,6 +17,7 @@ import RenameModal from "@/components/room/RenameModal";
 import RoomEndScreen from "@/components/room/RoomEndScreen";
 import WaitingRoomScreen from "@/components/room/WaitingRoomScreen";
 import Spinner from "@/components/ui/Spinner";
+import ZoomLogo from "@/components/ui/ZoomLogo";
 import { useToast } from "@/components/ui/Toast";
 import { useCopy } from "@/hooks/useCopy";
 import { useLocalMedia } from "@/hooks/useLocalMedia";
@@ -431,28 +432,36 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-room-bg text-white">
-      {/* Top bar */}
-      <div className="relative flex h-10 shrink-0 items-center justify-between px-2">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setInfoOpen((o) => !o)} className="rounded p-1.5 hover:bg-room-hover" aria-label="Meeting information">
-            <ShieldCheck className="h-5 w-5 text-zoom-green" />
+      {/* Top bar, like the Zoom app: logo, meeting title, and a few icons on the right */}
+      <div className="relative flex h-12 shrink-0 items-center gap-3 bg-[#1C1C1C] px-3 sm:px-4">
+        <ZoomLogo stacked className="hidden text-white sm:inline-flex" />
+        <button onClick={() => setInfoOpen((o) => !o)} className="flex min-w-0 items-center gap-2 rounded px-1.5 py-1 text-[15px] hover:bg-room-hover sm:ml-8" aria-label="Meeting information">
+          <Info className="h-4 w-4 shrink-0" />
+          <span className="truncate">{meeting.title}</span>
+        </button>
+        {meeting.started_at && now && (
+          <span className="shrink-0 text-xs tabular-nums text-[#9A9A9A]">{elapsed(meeting.started_at, now)}</span>
+        )}
+        {settings.is_locked && (
+          <span className="flex shrink-0 items-center gap-1 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#D0D0D0]">
+            <Lock className="h-3 w-3" /> Locked
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => setInfoOpen((o) => !o)} className="rounded p-1.5 hover:bg-room-hover" aria-label="Meeting security" title="This meeting is protected by a passcode">
+            <ShieldCheck className="h-5 w-5 text-[#23D959]" />
           </button>
-          {meeting.started_at && now && (
-            <span className="text-xs tabular-nums text-[#B3B3B3]">{elapsed(meeting.started_at, now)}</span>
-          )}
-          {settings.is_locked && (
-            <span className="flex items-center gap-1 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#D0D0D0]">
-              <Lock className="h-3 w-3" /> Locked
-            </span>
-          )}
-        </div>
-        <p className="absolute left-1/2 hidden max-w-[40%] -translate-x-1/2 truncate text-xs font-semibold text-[#D0D0D0] sm:block">
-          {meeting.title}
-        </p>
+          <button
+            onClick={() => setPanel((cur) => (cur === "notes" ? null : "notes"))}
+            className={`rounded p-1.5 hover:bg-room-hover ${panel === "notes" ? "bg-room-hover" : ""}`}
+            aria-label="Notes"
+            title="Notes"
+          >
+            <NotebookPen className="h-5 w-5" />
+          </button>
         <div className="relative">
-          <button onClick={() => setViewMenu((o) => !o)} className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold hover:bg-room-hover">
-            {view === "gallery" ? <LayoutGrid className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />}
-            View
+          <button onClick={() => setViewMenu((o) => !o)} className="rounded p-1.5 hover:bg-room-hover" aria-label="View" title="View">
+            {view === "gallery" ? <LayoutGrid className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />}
           </button>
           {viewMenu && (
             <>
@@ -474,6 +483,7 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
               </div>
             </>
           )}
+        </div>
         </div>
         {infoOpen && <MeetingInfo meeting={meeting} myName={me.display_name} onClose={() => setInfoOpen(false)} />}
       </div>
@@ -573,6 +583,7 @@ function InMeeting({ code, session, room }: { code: string; session: MeetingSess
         onToggleShare={toggleShare}
         onReact={react}
         onToggleHand={toggleHand}
+        onInvite={() => copy(invitationText(meeting), "Invitation")}
         onShowInfo={() => setInfoOpen(true)}
         onLeave={leave}
         onEndForAll={endForAll}

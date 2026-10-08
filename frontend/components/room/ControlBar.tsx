@@ -4,15 +4,16 @@ import { useState } from "react";
 import {
   Check,
   ChevronUp,
+  CircleEllipsis,
+  CircleX,
+  Heart,
   Info,
   MessageSquare,
   Mic,
   MicOff,
-  MonitorUp,
-  MoreHorizontal,
   NotebookPen,
-  Shield,
-  Smile,
+  ShieldPlus,
+  SquareArrowUp,
   Users,
   Video,
   VideoOff,
@@ -21,7 +22,7 @@ import type { LucideIcon } from "lucide-react";
 import type { DeviceOption } from "@/hooks/useLocalMedia";
 
 export type Panel = "participants" | "chat" | "notes" | "host";
-type Menu = "reactions" | "end" | "more" | "mic" | "cam";
+type Menu = "reactions" | "end" | "more" | "mic" | "cam" | "people" | "chat" | "share";
 
 interface Props {
   audioOn: boolean;
@@ -47,6 +48,7 @@ interface Props {
   onToggleShare: () => void;
   onReact: (emoji: string) => void;
   onToggleHand: () => void;
+  onInvite: () => void;
   onShowInfo: () => void;
   onLeave: () => void;
   onEndForAll: () => void;
@@ -54,7 +56,7 @@ interface Props {
 
 const REACTIONS = ["👏", "👍", "❤️", "😂", "😮", "🎉"];
 
-/** The black toolbar along the bottom of the meeting. */
+/** The black toolbar along the bottom of the meeting, laid out like the Zoom app. */
 export default function ControlBar(props: Props) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const toggleMenu = (m: Menu) => setMenu((cur) => (cur === m ? null : m));
@@ -65,15 +67,16 @@ export default function ControlBar(props: Props) {
   };
 
   return (
-    <footer className="relative z-20 flex h-[68px] shrink-0 items-center justify-between gap-1 bg-room-toolbar px-1 sm:px-4">
+    <footer className="relative z-20 flex h-[76px] shrink-0 items-center justify-between gap-1 bg-[#131313] px-1 sm:px-5">
       {menu && <div className="fixed inset-0 z-10" onClick={close} />}
 
-      {/* Left: mic and camera, each with a device menu on the arrow */}
-      <div className="flex items-center">
-        <div className="relative z-20 flex items-center">
+      {/* Left: audio and video, each with a device menu on the arrow */}
+      <div className="flex items-center gap-1 sm:gap-3">
+        <Group>
           <ToolButton
             icon={props.audioOn ? Mic : MicOff}
-            label={props.audioOn ? "Mute" : "Unmute"}
+            label="Audio"
+            ariaLabel={props.audioOn ? "Mute" : "Unmute"}
             danger={!props.audioOn}
             dimmed={!props.audioOn && props.blocked.unmute}
             onClick={props.onToggleAudio}
@@ -82,11 +85,12 @@ export default function ControlBar(props: Props) {
           {menu === "mic" && (
             <DeviceMenu title="Select a microphone" devices={props.mics} selected={props.micId} onPick={(id) => { close(); props.onSelectMic(id); }} />
           )}
-        </div>
-        <div className="relative z-20 flex items-center">
+        </Group>
+        <Group>
           <ToolButton
             icon={props.videoOn ? Video : VideoOff}
-            label={props.videoOn ? "Stop Video" : "Start Video"}
+            label="Video"
+            ariaLabel={props.videoOn ? "Stop Video" : "Start Video"}
             danger={!props.videoOn}
             dimmed={!props.videoOn && props.blocked.video}
             onClick={props.onToggleVideo}
@@ -95,46 +99,63 @@ export default function ControlBar(props: Props) {
           {menu === "cam" && (
             <DeviceMenu title="Select a camera" devices={props.cams} selected={props.camId} onPick={(id) => { close(); props.onSelectCam(id); }} />
           )}
-        </div>
+        </Group>
       </div>
 
       {/* Middle */}
-      <div className="flex min-w-0 items-center">
-        <ToolButton
-          icon={Users}
-          label="Participants"
-          active={props.activePanel === "participants"}
-          onClick={() => props.onTogglePanel("participants")}
-          badge={
-            <span className="absolute -top-1 left-[calc(50%+6px)] flex items-center gap-0.5 text-[10px] font-bold">
-              {props.participantCount}
-              {props.waitingCount > 0 && (
-                <span className="rounded-full bg-amber-400 px-1 text-zoom-ink" title="Waiting room">{props.waitingCount}</span>
-              )}
-            </span>
-          }
-        />
-        <ToolButton
-          icon={MessageSquare}
-          label="Chat"
-          active={props.activePanel === "chat"}
-          onClick={() => props.onTogglePanel("chat")}
-          badge={
-            props.unreadChat > 0 ? (
-              <span className="absolute -top-1 left-[calc(50%+4px)] min-w-4 rounded-full bg-zoom-red px-1 text-[10px] font-bold">
-                {props.unreadChat > 9 ? "9+" : props.unreadChat}
-              </span>
-            ) : null
-          }
-        />
-        <div className="relative z-20">
+      <div className="flex min-w-0 items-center gap-0 sm:gap-2">
+        <Group>
           <ToolButton
-            icon={Smile}
+            icon={Users}
+            label="Participants"
+            ariaLabel={`Participants ${props.participantCount}`}
+            active={props.activePanel === "participants"}
+            onClick={() => props.onTogglePanel("participants")}
+            count={
+              <span className="flex items-center gap-1 text-[13px]">
+                {props.participantCount}
+                {props.waitingCount > 0 && (
+                  <span className="rounded-full bg-amber-400 px-1.5 text-[11px] font-bold text-zoom-ink" title="Waiting room">{props.waitingCount}</span>
+                )}
+              </span>
+            }
+          />
+          <CaretButton label="Participant options" onClick={() => toggleMenu("people")} />
+          {menu === "people" && (
+            <Popover className="left-1/2 w-56 -translate-x-1/2 p-1.5">
+              <MenuRow onClick={run(props.onInvite)}>Invite</MenuRow>
+              <MenuRow onClick={run(() => props.onTogglePanel("participants"))}>Manage participants</MenuRow>
+            </Popover>
+          )}
+        </Group>
+        <Group>
+          <ToolButton
+            icon={MessageSquare}
+            label="Chat"
+            active={props.activePanel === "chat"}
+            onClick={() => props.onTogglePanel("chat")}
+            count={
+              props.unreadChat > 0 ? (
+                <span className="min-w-4 rounded-full bg-zoom-red px-1 text-center text-[10px] font-bold">{props.unreadChat > 9 ? "9+" : props.unreadChat}</span>
+              ) : null
+            }
+          />
+          <CaretButton label="Chat options" onClick={() => toggleMenu("chat")} />
+          {menu === "chat" && (
+            <Popover className="left-1/2 w-48 -translate-x-1/2 p-1.5">
+              <MenuRow onClick={run(() => props.onTogglePanel("chat"))}>Open chat</MenuRow>
+            </Popover>
+          )}
+        </Group>
+        <Group>
+          <ToolButton
+            icon={Heart}
             label="React"
             active={menu === "reactions"}
             dimmed={props.blocked.reactions}
             onClick={() => toggleMenu("reactions")}
           />
+          <CaretButton label="Emoji options" onClick={() => toggleMenu("reactions")} />
           {menu === "reactions" && (
             <Popover className="left-1/2 w-64 -translate-x-1/2">
               {props.blocked.reactions ? (
@@ -161,40 +182,40 @@ export default function ControlBar(props: Props) {
               </button>
             </Popover>
           )}
-        </div>
-        <ToolButton
-          icon={MonitorUp}
-          label={props.sharing ? "Stop Share" : "Share"}
-          onClick={props.onToggleShare}
-          dimmed={!props.sharing && props.blocked.share}
-          iconClass={props.sharing ? "bg-zoom-red text-white" : "bg-zoom-green text-white"}
-          className="hidden sm:flex"
-        />
+        </Group>
+        <Group className="hidden sm:flex">
+          <ToolButton
+            icon={SquareArrowUp}
+            label={props.sharing ? "Stop Share" : "Share"}
+            danger={props.sharing}
+            onClick={props.onToggleShare}
+            dimmed={!props.sharing && props.blocked.share}
+          />
+          <CaretButton label="Share options" onClick={() => toggleMenu("share")} />
+          {menu === "share" && (
+            <Popover className="left-1/2 w-52 -translate-x-1/2 p-1.5">
+              <MenuRow onClick={run(props.onToggleShare)}>{props.sharing ? "Stop sharing" : "Share screen..."}</MenuRow>
+            </Popover>
+          )}
+        </Group>
         {props.isHost && (
           <ToolButton
-            icon={Shield}
+            icon={ShieldPlus}
             label="Host tools"
             active={props.activePanel === "host"}
             onClick={() => props.onTogglePanel("host")}
             className="hidden sm:flex"
           />
         )}
-        <ToolButton
-          icon={NotebookPen}
-          label="Notes"
-          active={props.activePanel === "notes"}
-          onClick={() => props.onTogglePanel("notes")}
-          className="hidden md:flex"
-        />
         <div className="relative z-20">
-          <ToolButton icon={MoreHorizontal} label="More" active={menu === "more"} onClick={() => toggleMenu("more")} />
+          <ToolButton icon={CircleEllipsis} label="More" active={menu === "more"} onClick={() => toggleMenu("more")} />
           {menu === "more" && (
             <Popover className="right-0 w-max max-w-[16rem] p-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
               <div className="flex flex-wrap justify-center gap-1">
                 {/* On small screens some toolbar buttons move in here */}
-                <MoreItem icon={MonitorUp} label="Share" className="sm:hidden" onClick={run(props.onToggleShare)} />
-                {props.isHost && <MoreItem icon={Shield} label="Host tools" className="sm:hidden" onClick={run(() => props.onTogglePanel("host"))} />}
-                <MoreItem icon={NotebookPen} label="Notes" className="md:hidden" onClick={run(() => props.onTogglePanel("notes"))} />
+                <MoreItem icon={SquareArrowUp} label={props.sharing ? "Stop Share" : "Share"} className="sm:hidden" onClick={run(props.onToggleShare)} />
+                {props.isHost && <MoreItem icon={ShieldPlus} label="Host tools" className="sm:hidden" onClick={run(() => props.onTogglePanel("host"))} />}
+                <MoreItem icon={NotebookPen} label="Notes" onClick={run(() => props.onTogglePanel("notes"))} />
                 <MoreItem icon={Info} label="Meeting info" onClick={run(props.onShowInfo)} />
               </div>
             </Popover>
@@ -202,16 +223,17 @@ export default function ControlBar(props: Props) {
         </div>
       </div>
 
-      {/* Right: leave or end */}
+      {/* Right: leave or end, a red circle with an X like Zoom */}
       <div className="relative z-20">
         <button
           onClick={() => toggleMenu("end")}
-          className="rounded-lg bg-zoom-red px-3 py-1.5 text-sm font-bold text-white hover:bg-zoom-red-hover sm:px-4"
+          className="flex min-w-[52px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-white hover:bg-room-hover sm:min-w-[64px]"
         >
-          {props.isHost ? "End" : "Leave"}
+          <CircleX className="h-6 w-6 text-[#FF3B30]" strokeWidth={2} />
+          <span className="text-[12px] sm:text-[13px]">{props.isHost ? "End" : "Leave"}</span>
         </button>
         {menu === "end" && (
-          <div className="absolute bottom-[52px] right-0 w-60 animate-fade-up space-y-2 rounded-xl bg-[#2B2B2B] p-3 shadow-pop">
+          <div className="absolute bottom-[60px] right-0 w-60 animate-fade-up space-y-2 rounded-xl bg-[#2B2B2B] p-3 shadow-pop">
             {props.isHost && (
               <button onClick={run(props.onEndForAll)} className="w-full rounded-lg bg-zoom-red py-2 text-sm font-bold text-white hover:bg-zoom-red-hover">
                 End meeting for all
@@ -227,11 +249,25 @@ export default function ControlBar(props: Props) {
   );
 }
 
+/** A button and its small ^ arrow, sitting together. */
+function Group({ className = "", children }: { className?: string; children: React.ReactNode }) {
+  // "hidden" (when given) wins over "flex" in Tailwind's order, and "sm:flex" brings it back.
+  return <div className={`relative z-20 flex items-start ${className}`}>{children}</div>;
+}
+
 function Popover({ className = "", children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div className={`absolute bottom-[64px] animate-fade-up rounded-xl bg-[#2B2B2B] p-3 text-white shadow-pop ${className}`}>
+    <div className={`absolute bottom-[68px] animate-fade-up rounded-xl bg-[#2B2B2B] p-3 text-white shadow-pop ${className}`}>
       {children}
     </div>
+  );
+}
+
+function MenuRow({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-white/10">
+      {children}
+    </button>
   );
 }
 
@@ -288,9 +324,9 @@ function CaretButton({ label, onClick }: { label: string; onClick: () => void })
     <button
       onClick={onClick}
       aria-label={label}
-      className="-ml-2 hidden self-start rounded p-1 pt-2.5 text-[#9A9A9A] hover:bg-room-hover hover:text-white sm:block"
+      className="-ml-1.5 mt-2 hidden rounded p-1 text-[#BDBDBD] hover:bg-room-hover hover:text-white sm:block"
     >
-      <ChevronUp className="h-3 w-3" />
+      <ChevronUp className="h-3.5 w-3.5" strokeWidth={2.5} />
     </button>
   );
 }
@@ -298,37 +334,40 @@ function CaretButton({ label, onClick }: { label: string; onClick: () => void })
 function ToolButton({
   icon: Icon,
   label,
+  ariaLabel,
   onClick,
   danger,
   active,
   dimmed,
-  badge,
-  iconClass,
+  count,
   className = "",
 }: {
   icon: LucideIcon;
   label: string;
+  /** What a screen reader says, when it differs from the visible label (e.g. "Mute" under "Audio"). */
+  ariaLabel?: string;
   onClick: () => void;
   danger?: boolean;
   active?: boolean;
   /** Greyed out because the host blocked it. Still clickable so we can explain why. */
   dimmed?: boolean;
-  badge?: React.ReactNode;
-  iconClass?: string;
+  /** A number shown next to the icon, like the participant count. */
+  count?: React.ReactNode;
   className?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`relative flex min-w-[52px] flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[#E6E6E6] hover:bg-room-hover sm:min-w-[72px] sm:px-2 ${
+      aria-label={ariaLabel}
+      className={`relative flex min-w-[52px] flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-white hover:bg-room-hover sm:min-w-[64px] sm:px-2 ${
         active ? "bg-room-hover" : ""
       } ${dimmed ? "opacity-40" : ""} ${className}`}
     >
-      <span className={`flex h-6 items-center justify-center rounded-md ${iconClass ? `${iconClass} w-7` : ""}`}>
-        <Icon className={`${iconClass ? "h-4 w-4" : "h-5 w-5"} ${danger ? "text-zoom-red" : ""}`} strokeWidth={2} />
+      <span className="flex h-7 items-center gap-1">
+        <Icon className={`h-6 w-6 ${danger ? "text-[#FF3B30]" : ""}`} strokeWidth={1.6} />
+        {count}
       </span>
-      {badge}
-      <span className="whitespace-nowrap text-[10px] sm:text-[11px]">{label}</span>
+      <span className="whitespace-nowrap text-[12px] sm:text-[13px]">{label}</span>
     </button>
   );
 }

@@ -3,7 +3,7 @@
 export default function ZoomLogo({ className = "", stacked = false }: { className?: string; stacked?: boolean }) {
   if (stacked) {
     return (
-      <span className={`inline-flex flex-col leading-none text-zoom-ink ${className}`}>
+      <span className={`inline-flex flex-col leading-none ${className.includes("text-white") ? "" : "text-zoom-ink"} ${className}`}>
         <span className="text-[13px] font-black tracking-tight">zoom</span>
         <span className="text-[19px] font-bold tracking-tight">Workplace</span>
       </span>

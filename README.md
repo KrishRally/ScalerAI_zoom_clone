@@ -77,14 +77,15 @@ Every item from the assignment, and where to find it.
 - **Meetings page:** laid out like Zoom's Meetings tab. On the left: a month calendar (dots on days with meetings, today highlighted), a blue **+** to schedule, your name, and your **Personal meeting ID** (click to copy). On the right: an **Agenda** of the chosen day and the two weeks after it, grouped by day, each meeting showing start and end time, title and host, with a red line marking **now**. Toolbar: Today, previous / next day, search this list, refresh, a filter to hide meetings that are over, and an **Agenda / Previous meetings** switch. Click a meeting for its details (Start, Copy invitation, Edit, Delete and your notes from it).
 
 **Meeting room**
+- **Laid out like the Zoom app.** Top bar: the Zoom Workplace logo, ⓘ and the meeting title (opens meeting info), the meeting timer, and on the right the green security shield, **Notes** and **View** (Speaker / Gallery). Bottom bar: **Audio** and **Video** (each with a ^ menu to pick the microphone or camera), then **Participants** with the count (^: Invite, Manage participants), **Chat** (^), **React** (^: emojis and Raise Hand), **Share** (^), **Host tools**, **More**, and a red ⓧ **End** (or **Leave**) on the right.
 - Gallery view (tiles sized to fit the screen at 16:9, like Zoom) and Speaker view.
 - Your real camera and microphone through the browser, with a green border while you talk.
 - Mute / Unmute and Start / Stop Video, with a menu on each arrow to switch microphone or camera mid meeting.
-- Share Screen (your own screen preview), Raise Hand, and **Reactions that everyone in the meeting sees**.
+- Share Screen (see below), Raise Hand, and **Reactions that everyone in the meeting sees**.
 - Participants panel with search, host and "me" labels, mic and video status, **Rename**.
 - Meeting chat to everyone, with an unread badge.
 - **Notes:** private notes that save as you type (like Zoom's "My Notes") and show up later on the Meetings page.
-- **More menu:** Meeting info (and, on small screens, the toolbar buttons that don't fit).
+- **More menu:** Notes and Meeting info (and, on small screens, the toolbar buttons that don't fit).
 - Meeting info popup (green shield): Meeting ID, host, passcode, invite link.
 - Live meeting timer and a "Locked" badge when the host locks the meeting.
 
